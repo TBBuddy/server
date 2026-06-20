@@ -35,6 +35,7 @@ import { UsersModule } from './users/users.module';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
+        prefix: config.getOrThrow<string>('REDIS_PREFIX'),
         connection: {
           host: config.getOrThrow<string>('REDIS_HOST'),
           port: config.getOrThrow<number>('REDIS_PORT'),
