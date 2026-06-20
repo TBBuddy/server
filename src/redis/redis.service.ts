@@ -23,6 +23,7 @@ export class RedisService implements OnApplicationShutdown {
       this.client = new Redis({
         host: this.configService.getOrThrow<string>('REDIS_HOST'),
         port: this.configService.getOrThrow<number>('REDIS_PORT'),
+        username: this.configService.get<string>('REDIS_USERNAME') || undefined,
         password,
         lazyConnect: true,
         maxRetriesPerRequest: 1,
