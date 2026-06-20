@@ -1,0 +1,6 @@
+export enum TreatmentStatus {
+  NOT_PATIENT = 'NOT_PATIENT',
+  ON_TREATMENT = 'ON_TREATMENT',
+  RECOVERED = 'RECOVERED',
+  DROPPED = 'DROPPED',
+}
