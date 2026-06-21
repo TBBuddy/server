@@ -4,7 +4,10 @@ import { DB } from 'mongoloquent';
 import { ObjectId } from 'mongodb';
 import { addMonths, differenceInDays, parseISO, startOfDay } from 'date-fns';
 import { AppException } from '../common/exceptions/app.exception';
-import { PatientProfile, IPatientProfile } from './models/patient-profile.model';
+import {
+  PatientProfile,
+  IPatientProfile,
+} from './models/patient-profile.model';
 import { PatientPmo, IPatientPmo } from './models/patient-pmo.model';
 import { OnboardingDto } from './dto/onboarding.dto';
 import { UpdatePatientProfileDto } from './dto/update-patient-profile.dto';
@@ -29,9 +32,7 @@ export class PatientsService {
   // ─── ONBOARDING ───────────────────────────────────────────────────────────
 
   async createOnboarding(userId: string, dto: OnboardingDto): Promise<void> {
-    const existing = await this.profileModel
-      .where('user_id', userId)
-      .first();
+    const existing = await this.profileModel.where('user_id', userId).first();
 
     if (existing) {
       throw new AppException(
@@ -102,7 +103,7 @@ export class PatientsService {
       .where('is_active', true)
       .get();
 
-    return PatientProfileSerializer.toProfile(profile, pmos as IPatientPmo[]);
+    return PatientProfileSerializer.toProfile(profile, pmos);
   }
 
   async updateOwnProfile(
@@ -125,7 +126,8 @@ export class PatientsService {
 
     // medicine_time dan treatment_start_date hanya boleh diubah jika has_dropped_before = true
     if (
-      (dto.medicineTime !== undefined || dto.treatmentStartDate !== undefined) &&
+      (dto.medicineTime !== undefined ||
+        dto.treatmentStartDate !== undefined) &&
       !profile.has_dropped_before
     ) {
       throw new AppException(
@@ -168,9 +170,7 @@ export class PatientsService {
       // TIDAK direset — ini lifetime stats
     }
 
-    await this.profileModel
-      .where('user_id', userId)
-      .update(changes);
+    await this.profileModel.where('user_id', userId).update(changes);
   }
 
   async getDashboard(userId: string): Promise<PatientDashboardResponseDto> {
@@ -221,29 +221,23 @@ export class PatientsService {
   ): Promise<void> {
     const pmo = await this.requirePmo(userId, pmoId);
 
-    if (dto.isPrimary === true && !pmo.is_primary) {
-      // Switching primary harus atomik: unset semua, lalu set yang baru
-      await DB.transaction(async () => {
-        await this.pmoModel
-          .where('patient_id', userId)
-          .where('is_primary', true)
-          .update({ is_primary: false });
-
-        await this.pmoModel
-          .where('_id', new ObjectId(pmoId))
-          .update({ is_primary: true });
-      });
-      return;
-    }
-
     const changes: Partial<IPatientPmo> = {};
     if (dto.name !== undefined) changes.name = dto.name;
     if (dto.relationship !== undefined) changes.relationship = dto.relationship;
     if (dto.phoneNumber !== undefined) changes.phone_number = dto.phoneNumber;
-    if (dto.whatsappNumber !== undefined) changes.whatsapp_number = dto.whatsappNumber;
+    if (dto.whatsappNumber !== undefined)
+      changes.whatsapp_number = dto.whatsappNumber;
     if (dto.email !== undefined) changes.email = dto.email;
 
-    if (Object.keys(changes).length === 0) {
+    if (dto.isPrimary === false && pmo.is_primary) {
+      throw new AppException(
+        422,
+        'BUSINESS_RULE_VIOLATION',
+        'PMO utama hanya dapat diganti dengan memilih PMO utama yang baru.',
+      );
+    }
+
+    if (Object.keys(changes).length === 0 && dto.isPrimary === undefined) {
       throw new AppException(
         400,
         'BUSINESS_RULE_VIOLATION',
@@ -261,9 +255,24 @@ export class PatientsService {
       );
     }
 
-    await this.pmoModel
-      .where('_id', new ObjectId(pmoId))
-      .update(changes);
+    if (dto.isPrimary === true && !pmo.is_primary) {
+      // Switching primary harus atomik dan tetap menerapkan perubahan field lain.
+      await DB.transaction(async () => {
+        await this.pmoModel
+          .where('patient_id', userId)
+          .where('is_primary', true)
+          .update({ is_primary: false });
+
+        await this.pmoModel
+          .where('_id', new ObjectId(pmoId))
+          .update({ ...changes, is_primary: true });
+      });
+      return;
+    }
+
+    if (Object.keys(changes).length === 0) return;
+
+    await this.pmoModel.where('_id', new ObjectId(pmoId)).update(changes);
   }
 
   async deactivatePmo(userId: string, pmoId: string): Promise<void> {
@@ -288,7 +297,7 @@ export class PatientsService {
       // Promote PMO lain jadi primary, lalu nonaktifkan yang ini
       await DB.transaction(async () => {
         await this.pmoModel
-          .where('_id', (otherActive as IPatientPmo)._id)
+          .where('_id', otherActive._id)
           .update({ is_primary: true });
 
         await this.pmoModel
@@ -306,9 +315,7 @@ export class PatientsService {
   // ─── SHARED HELPERS ───────────────────────────────────────────────────────
 
   async requireProfile(userId: string): Promise<IPatientProfile> {
-    const profile = await this.profileModel
-      .where('user_id', userId)
-      .first();
+    const profile = await this.profileModel.where('user_id', userId).first();
 
     if (!profile) {
       throw new AppException(
@@ -317,7 +324,7 @@ export class PatientsService {
         'Profil pasien tidak ditemukan.',
       );
     }
-    return profile as IPatientProfile;
+    return profile;
   }
 
   private async requirePmo(
@@ -337,12 +344,10 @@ export class PatientsService {
     if (!pmo) {
       throw new AppException(404, 'RESOURCE_NOT_FOUND', 'PMO tidak ditemukan.');
     }
-    return pmo as IPatientPmo;
+    return pmo;
   }
 
-  private validatePmoContact(
-    dto: Pick<CreatePmoDto, 'email'>,
-  ): void {
+  private validatePmoContact(dto: Pick<CreatePmoDto, 'email'>): void {
     if (!dto.email) {
       throw new AppException(
         422,

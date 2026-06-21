@@ -18,16 +18,20 @@ export class PatientProfileResponseDto {
   @ApiProperty() diagnosisDate!: Date;
   @ApiProperty() medicineTime!: string;
   @ApiPropertyOptional({ nullable: true }) treatmentStartDate!: Date | null;
-  @ApiPropertyOptional({ nullable: true }) estimatedTreatmentEndDate!: Date | null;
+  @ApiPropertyOptional({ nullable: true })
+  estimatedTreatmentEndDate!: Date | null;
   @ApiProperty() treatmentDayCount!: number;
   @ApiProperty() treatmentDurationMonths!: number;
   @ApiProperty() hasDroppedBefore!: boolean;
-  @ApiPropertyOptional({ nullable: true }) previousTreatmentNote!: string | null;
+  @ApiPropertyOptional({ nullable: true }) previousTreatmentNote!:
+    | string
+    | null;
   @ApiProperty() currentStreak!: number;
   @ApiProperty() longestStreak!: number;
   @ApiProperty() totalCheckins!: number;
   @ApiProperty() totalMissedDays!: number;
-  @ApiProperty({ type: [PatientPmoResponseDto] }) pmos!: PatientPmoResponseDto[];
+  @ApiProperty({ type: [PatientPmoResponseDto] })
+  pmos!: PatientPmoResponseDto[];
   @ApiPropertyOptional() createdAt?: Date;
   @ApiPropertyOptional() updatedAt?: Date;
 }
@@ -40,7 +44,8 @@ export class PatientProfileDataResponseDto {
 export class PatientDashboardResponseDto {
   @ApiProperty() treatmentDayCount!: number;
   @ApiProperty() treatmentDurationMonths!: number;
-  @ApiPropertyOptional({ nullable: true }) estimatedTreatmentEndDate!: Date | null;
+  @ApiPropertyOptional({ nullable: true })
+  estimatedTreatmentEndDate!: Date | null;
   @ApiProperty() medicineTime!: string;
   @ApiProperty() currentStreak!: number;
   @ApiProperty() longestStreak!: number;

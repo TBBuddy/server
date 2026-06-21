@@ -1,9 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@mongoloquent/nestjs';
-import { PatientProfile, IPatientProfile } from './models/patient-profile.model';
+import {
+  PatientProfile,
+  IPatientProfile,
+} from './models/patient-profile.model';
 import { PatientPmo, IPatientPmo } from './models/patient-pmo.model';
 import { PatientsService } from './patients.service';
-import { CreatePmoDto } from './dto/create-pmo.dto';
 
 @Injectable()
 export class PatientsIndexService {
@@ -16,9 +18,7 @@ export class PatientsIndexService {
   ) {}
 
   async hasProfile(userId: string): Promise<boolean> {
-    const profile = await this.profileModel
-      .where('user_id', userId)
-      .first();
+    const profile = await this.profileModel.where('user_id', userId).first();
     return profile !== null;
   }
 
@@ -26,9 +26,7 @@ export class PatientsIndexService {
     return this.patientsService.requireProfile(userId);
   }
 
-  async getMedicineSchedule(
-    userId: string,
-  ): Promise<{ medicineTime: string }> {
+  async getMedicineSchedule(userId: string): Promise<{ medicineTime: string }> {
     const profile = await this.patientsService.requireProfile(userId);
     return { medicineTime: profile.medicine_time };
   }
@@ -49,7 +47,8 @@ export class PatientsIndexService {
     if (stats.totalCheckins)
       changes.total_checkins = profile.total_checkins + stats.totalCheckins;
     if (stats.totalMissedDays)
-      changes.total_missed_days = profile.total_missed_days + stats.totalMissedDays;
+      changes.total_missed_days =
+        profile.total_missed_days + stats.totalMissedDays;
     if (stats.currentStreak !== undefined)
       changes.current_streak = stats.currentStreak;
     if (stats.longestStreak !== undefined)
@@ -61,19 +60,15 @@ export class PatientsIndexService {
       changes.treatment_day_count = stats.treatmentDayCount;
 
     if (Object.keys(changes).length > 0) {
-      await this.profileModel
-        .where('user_id', userId)
-        .update(changes);
+      await this.profileModel.where('user_id', userId).update(changes);
     }
   }
 
   async setDroppedBefore(userId: string): Promise<void> {
-    const profile = await this.profileModel
-      .where('user_id', userId)
-      .first();
+    const profile = await this.profileModel.where('user_id', userId).first();
 
     // Idempotent: tidak lakukan apa-apa jika sudah true
-    if (!profile || (profile as IPatientProfile).has_dropped_before) return;
+    if (!profile || profile.has_dropped_before) return;
 
     await this.profileModel
       .where('user_id', userId)
@@ -86,6 +81,6 @@ export class PatientsIndexService {
       .where('is_primary', true)
       .where('is_active', true)
       .first();
-    return (pmo as IPatientPmo) ?? null;
+    return pmo ?? null;
   }
 }

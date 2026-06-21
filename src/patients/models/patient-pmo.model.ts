@@ -1,4 +1,4 @@
-import {IMongoloquentSchema, Model} from "mongoloquent"
+import { IMongoloquentSchema, Model } from 'mongoloquent';
 
 export interface IPatientPmo extends IMongoloquentSchema {
   patient_id: string;

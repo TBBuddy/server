@@ -70,7 +70,9 @@ export class AuthService {
   ): Promise<DataResponse<AuthSessionUserDto>> {
     const user = await this.usersService.requireById(currentUser.id);
 
-    const hasProfile = await this.patientsIndexService.hasProfile(currentUser.id)
+    const hasProfile = await this.patientsIndexService.hasProfile(
+      currentUser.id,
+    );
 
     return { data: UserSerializer.toAuthSession(user, hasProfile) };
   }

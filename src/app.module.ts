@@ -14,7 +14,6 @@ import { User } from './users/user.model';
 import { UsersModule } from './users/users.module';
 import { PatientsModule } from './patients/patients.module';
 
-
 @Module({
   imports: [
     ConfigModule.forRoot({

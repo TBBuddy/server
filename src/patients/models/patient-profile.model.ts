@@ -1,8 +1,8 @@
-import {IMongoloquentSchema, Model} from "mongoloquent"
+import { IMongoloquentSchema, Model } from 'mongoloquent';
 
-export interface IPatientProfile extends IMongoloquentSchema{
-  user_id: string
-  diagnosis_date: Date
+export interface IPatientProfile extends IMongoloquentSchema {
+  user_id: string;
+  diagnosis_date: Date;
   medicine_time: string;
   treatment_start_date: Date | null;
   estimated_treatment_end_date: Date | null;
@@ -19,13 +19,12 @@ export interface IPatientProfile extends IMongoloquentSchema{
 }
 
 export class PatientProfile extends Model<IPatientProfile> {
-  public static $schema: IPatientProfile
-  protected $collection= "patient_profiles"
+  public static $schema: IPatientProfile;
+  protected $collection = 'patient_profiles';
 
-  constructor(){
-    super()
-    this.setCreatedAt("created_at")
-    this.setUpdatedAt("updated_at")
+  constructor() {
+    super();
+    this.setCreatedAt('created_at');
+    this.setUpdatedAt('updated_at');
   }
-
 }

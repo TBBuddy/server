@@ -4,7 +4,6 @@ import {
   IsBoolean,
   IsDateString,
   IsEmail,
-  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -12,36 +11,33 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-
-export class CreatePmoInlineDto{
-  @ApiProperty({example: "Budi Santoso"})
+export class CreatePmoInlineDto {
+  @ApiProperty({ example: 'Budi Santoso' })
   @IsString()
   @IsNotEmpty()
   name!: string;
 
-  @ApiPropertyOptional({example: "keluarga"})
+  @ApiPropertyOptional({ example: 'keluarga' })
   @IsOptional()
   @IsString()
   relationship?: string;
 
-
-  @ApiPropertyOptional({example: "+6281234567890"})
+  @ApiPropertyOptional({ example: '+6281234567890' })
   @IsOptional()
   @IsString()
   phoneNumber?: string;
 
-  @ApiPropertyOptional({ example: "+6281234567890" })
+  @ApiPropertyOptional({ example: '+6281234567890' })
   @IsOptional()
   @IsString()
   whatsappNumber?: string;
 
-  @ApiProperty({ example: "budi@example.com" })
+  @ApiProperty({ example: 'budi@example.com' })
   @IsEmail()
   email!: string;
-
 }
 
-export class OnboardingDto{
+export class OnboardingDto {
   @ApiProperty({ example: '2026-01-15' })
   @IsDateString()
   diagnosisDate!: string;
@@ -56,13 +52,14 @@ export class OnboardingDto{
   @IsDateString()
   treatmentStartDate?: string;
 
-
   @ApiPropertyOptional({ example: false })
   @IsOptional()
   @IsBoolean()
   hasDroppedBefore?: boolean;
 
-  @ApiPropertyOptional({ example: 'Sempat berhenti 3 bulan karena efek samping.' })
+  @ApiPropertyOptional({
+    example: 'Sempat berhenti 3 bulan karena efek samping.',
+  })
   @IsOptional()
   @IsString()
   previousTreatmentNote?: string;
@@ -72,5 +69,4 @@ export class OnboardingDto{
   @ValidateNested()
   @Type(() => CreatePmoInlineDto)
   pmo?: CreatePmoInlineDto;
-
 }

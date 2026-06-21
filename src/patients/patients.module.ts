@@ -8,8 +8,10 @@ import { PatientsIndexService } from './patients-index.service';
 import { PatientsController } from './patients.controller';
 
 @Module({
-  imports: [MongoloquentModule.forFeature([PatientProfile, PatientPmo]),
-UsersModule],
+  imports: [
+    MongoloquentModule.forFeature([PatientProfile, PatientPmo]),
+    UsersModule,
+  ],
   controllers: [PatientsController],
   providers: [PatientsService, PatientsIndexService],
   exports: [PatientsIndexService, MongoloquentModule],
