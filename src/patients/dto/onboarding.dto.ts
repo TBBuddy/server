@@ -35,7 +35,7 @@ export class CreatePmoInlineDto{
   @IsString()
   whatsappNumber?: string;
 
-  @ApiProperty({ example: 'budi@example.com' })
+  @ApiProperty({ example: "budi@example.com" })
   @IsEmail()
   email!: string;
 
@@ -56,10 +56,6 @@ export class OnboardingDto{
   @IsDateString()
   treatmentStartDate?: string;
 
-  @ApiPropertyOptional({ example: 6, enum: [6, 8] })
-  @IsOptional()
-  @IsIn([6, 8])
-  treatmentDurationMonths?: number;
 
   @ApiPropertyOptional({ example: false })
   @IsOptional()
