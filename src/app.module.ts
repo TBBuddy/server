@@ -12,6 +12,8 @@ import { HealthModule } from './health/health.module';
 import { RedisModule } from './redis/redis.module';
 import { User } from './users/user.model';
 import { UsersModule } from './users/users.module';
+import { PatientsModule } from './patients/patients.module';
+
 
 @Module({
   imports: [
@@ -55,6 +57,7 @@ import { UsersModule } from './users/users.module';
     UsersModule,
     AuthModule,
     HealthModule,
+    PatientsModule,
   ],
   providers: [
     RequestContextMiddleware,
