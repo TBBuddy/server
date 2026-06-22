@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@mongoloquent/nestjs';
+import { ConfigService } from '@nestjs/config';
+import { ClientSession } from 'mongodb';
+import { Database } from 'mongoloquent';
 import {
   PatientProfile,
   IPatientProfile,
@@ -15,6 +18,7 @@ export class PatientsIndexService {
     @InjectModel(PatientPmo)
     private readonly pmoModel: typeof PatientPmo,
     private readonly patientsService: PatientsService,
+    private readonly configService: ConfigService,
   ) {}
 
   async hasProfile(userId: string): Promise<boolean> {
@@ -40,6 +44,7 @@ export class PatientsIndexService {
       longestStreak: number;
       treatmentDayCount: number;
     }>,
+    session?: ClientSession,
   ): Promise<void> {
     const profile = await this.patientsService.requireProfile(userId);
     const changes: Record<string, number> = {};
@@ -60,7 +65,16 @@ export class PatientsIndexService {
       changes.treatment_day_count = stats.treatmentDayCount;
 
     if (Object.keys(changes).length > 0) {
-      await this.profileModel.where('user_id', userId).update(changes);
+      await Database.getDb(
+        this.configService.getOrThrow<string>('MONGODB_CONNECTION'),
+        this.configService.getOrThrow<string>('MONGODB_DATABASE'),
+      )
+        .collection<IPatientProfile>('patient_profiles')
+        .updateOne(
+          { user_id: userId },
+          { $set: { ...changes, updated_at: new Date() } },
+          { session },
+        );
     }
   }
 

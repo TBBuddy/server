@@ -8,7 +8,7 @@ export interface IDailyCheckin extends IMongoloquentSchema {
   has_taken_medicine: boolean;
   taken_at: Date | null;
   has_complaint: boolean;
-  severity: SeverityLevel | null;
+  severity: SeverityLevel;
   general_note: string | null;
   skipped_reason: string | null;
   created_at?: Date;

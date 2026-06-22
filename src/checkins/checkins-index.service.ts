@@ -46,7 +46,11 @@ export class CheckinsIndexService implements OnApplicationBootstrap {
     await checkinSymptoms.createIndexes([
       { key: { checkin_id: 1 }, name: 'checkin_symptoms_checkin_id' },
       { key: { patient_id: 1 }, name: 'checkin_symptoms_patient_id' },
-      { key: { symptom_id: 1 }, name: 'checkin_symptoms_symptom_id' },
+      {
+        key: { checkin_id: 1, symptom_id: 1 },
+        name: 'checkin_symptoms_checkin_symptom',
+        unique: true,
+      },
       { key: { severity: 1 }, name: 'checkin_symptoms_severity' },
     ]);
   }

@@ -63,9 +63,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       this.logger.warn(logContext);
     }
 
-    if (requestId !== undefined) {
-      response.setHeader('x-request-id', requestId);
-    }
+    response.setHeader('x-request-id', requestId);
     response.status(normalized.statusCode).json(payload);
   }
 
