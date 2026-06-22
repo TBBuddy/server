@@ -1,0 +1,31 @@
+import { Module } from '@nestjs/common';
+import { MongoloquentModule } from '@mongoloquent/nestjs';
+import { Symptom } from './models/symptom.model';
+import { DailyCheckin } from './models/daily-checkin.model';
+import { CheckinSymptom } from './models/checkin-symptom.model';
+import { PatientProfile } from '../patients/models/patient-profile.model';
+import { CheckinsService } from './checkins.service';
+import { CheckinsIndexService } from './checkins-index.service';
+import { CheckinsController } from './checkins.controller';
+import { SymptomsController } from './symptoms.controller';
+import { UsersModule } from '../users/users.module';
+import { PatientsModule } from '../patients/patients.module';
+import { MedicineStocksModule } from '../medicine-stocks/medicine-stocks.module';
+
+@Module({
+  imports: [
+    MongoloquentModule.forFeature([
+      Symptom,
+      DailyCheckin,
+      CheckinSymptom,
+      PatientProfile,
+    ]),
+    UsersModule,
+    PatientsModule,
+    MedicineStocksModule,
+  ],
+  controllers: [CheckinsController, SymptomsController],
+  providers: [CheckinsService, CheckinsIndexService],
+  exports: [CheckinsService, CheckinsIndexService],
+})
+export class CheckinsModule {}
