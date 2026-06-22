@@ -43,5 +43,8 @@ export function configureApplication(app: INestApplication): void {
     SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, documentFactory, {
     jsonDocumentUrl: 'api/docs-json',
+    swaggerOptions: {
+      url: '/api/docs-json',
+    },
   });
 }
