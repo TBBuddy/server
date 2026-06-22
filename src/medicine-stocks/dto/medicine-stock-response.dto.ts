@@ -23,13 +23,28 @@ export class MedicineStockDetailResponseDto extends MedicineStockResponseDto {
   // Sama dengan list item untuk MVP. Bisa ditambah field nanti.
 }
 
-// Untuk wrap response {data}
 export class MedicineStockDataResponseDto {
   @ApiProperty({ type: MedicineStockDetailResponseDto })
   data!: MedicineStockDetailResponseDto;
 }
 
-// Untuk index service (ringkas, tanpa wrap)
+export class MedicineStockPaginationMetaDto {
+  @ApiProperty() page!: number;
+  @ApiProperty() limit!: number;
+  @ApiProperty() totalItems!: number;
+  @ApiProperty() totalPages!: number;
+  @ApiProperty() hasNextPage!: boolean;
+  @ApiProperty() hasPreviousPage!: boolean;
+}
+
+export class PaginatedMedicineStockResponseDto {
+  @ApiProperty({ type: [MedicineStockResponseDto] })
+  data!: MedicineStockResponseDto[];
+
+  @ApiProperty({ type: MedicineStockPaginationMetaDto })
+  meta!: MedicineStockPaginationMetaDto;
+}
+
 export class MedicineStockSummaryDto {
   id!: string;
   medicineName!: string;
@@ -53,12 +68,14 @@ export class MedicineStockLogResponseDto {
   @ApiProperty() createdAt!: string;
 }
 
-export class MedicineStockLogDataResponseDto {
-  @ApiProperty({ type: MedicineStockLogResponseDto })
+export class PaginatedMedicineStockLogResponseDto {
+  @ApiProperty({ type: [MedicineStockLogResponseDto] })
   data!: MedicineStockLogResponseDto[];
+
+  @ApiProperty({ type: MedicineStockPaginationMetaDto })
+  meta!: MedicineStockPaginationMetaDto;
 }
 
-// Untuk index service F08
 export class TravelStockRequirementDto {
   stockId!: string;
   medicineName!: string;
@@ -67,7 +84,7 @@ export class TravelStockRequirementDto {
   neededQuantity!: number;
   availableQuantity!: number;
   isEnough!: boolean;
-  shortageQuantity!: number;  // 0 jika cukup
+  shortageQuantity!: number;
 }
 
 export class TravelStockRequirementSummaryDto {

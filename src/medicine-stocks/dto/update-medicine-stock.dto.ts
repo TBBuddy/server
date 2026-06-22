@@ -8,23 +8,29 @@ import {
   Min,
   MaxLength,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
+
+const trimString = ({ value }: { value: unknown }): unknown =>
+  typeof value === 'string' ? value.trim() : value;
 
 export class UpdateMedicineStockDto {
   @ApiPropertyOptional({ example: 'Rifampicin 600mg' })
   @IsOptional()
+  @Transform(trimString)
   @IsString()
   @MaxLength(100)
   medicineName?: string;
 
   @ApiPropertyOptional({ example: 'OAT' })
   @IsOptional()
+  @Transform(trimString)
   @IsString()
   @MaxLength(50)
   medicineType?: string;
 
   @ApiPropertyOptional({ example: 'tablet' })
   @IsOptional()
+  @Transform(trimString)
   @IsString()
   @MaxLength(20)
   unit?: string;

@@ -12,7 +12,7 @@ export class MedicineStockSerializer {
       stock.daily_dose > 0 ? Math.floor(stock.quantity / stock.daily_dose) : 0;
 
     return {
-      id: stock._id!.toString(),
+      id: stock._id.toString(),
       patientId: stock.patient_id,
       medicineName: stock.medicine_name,
       medicineType: stock.medicine_type ?? null,
@@ -39,7 +39,7 @@ export class MedicineStockSerializer {
     const daysRemaining =
       stock.daily_dose > 0 ? Math.floor(stock.quantity / stock.daily_dose) : 0;
     return {
-      id: stock._id!.toString(),
+      id: stock._id.toString(),
       medicineName: stock.medicine_name,
       quantity: stock.quantity,
       dailyDose: stock.daily_dose,
@@ -54,11 +54,10 @@ export class MedicineStockSerializer {
 
   static toLogResponse(log: IMedicineStockLog): MedicineStockLogResponseDto {
     // note untuk CHECK_IN berisi "checkin:${checkinId}" — jangan expose ke client
-    const safeNote =
-      log.reason === 'CHECK_IN' ? null : log.note ?? null;
+    const safeNote = log.reason === 'CHECK_IN' ? null : (log.note ?? null);
 
     return {
-      id: log._id!.toString(),
+      id: log._id.toString(),
       medicineStockId: log.medicine_stock_id,
       patientId: log.patient_id,
       changeQuantity: log.change_quantity,

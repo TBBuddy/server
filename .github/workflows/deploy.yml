@@ -92,5 +92,5 @@ jobs:
             "$VPS_USER@$VPS_HOST" \
             "cd '$TARGET_DIRECTORY' && \
              docker compose -f '$COMPOSE_FILE' up -d --build && \
-             curl --fail --silent --show-error --retry 10 --retry-delay 3 --retry-connrefused '$HEALTH_URL' && \
+             curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 3 '$HEALTH_URL' && \
              docker image prune -f"

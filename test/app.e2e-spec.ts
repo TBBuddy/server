@@ -1,14 +1,17 @@
 import type { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Database } from 'mongoloquent';
+import { ObjectId } from 'mongodb';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import request from 'supertest';
 import { UserRole } from '../src/common/enums/user-role.enum';
+import { FacilitiesService } from '../src/facilities/facilities.service';
 
 describe('TBuddy F00/F01 API (e2e)', () => {
   let app: INestApplication;
   let replSet: MongoMemoryReplSet;
   let mongoUri: string;
+  let patientAuthorization: string;
   const databaseName = 'tbuddy_e2e';
   const suffix = Date.now().toString();
   const patient = {
@@ -87,6 +90,9 @@ describe('TBuddy F00/F01 API (e2e)', () => {
 
     expect(response.body.paths['/api/v1/auth/register']).toBeDefined();
     expect(response.body.paths['/api/v1/users/me']).toBeDefined();
+    expect(response.body.paths['/api/v1/facilities']).toBeDefined();
+    expect(response.body.paths['/api/v1/facilities/nearby']).toBeDefined();
+    expect(response.body.paths['/api/v1/facilities/{id}']).toBeDefined();
   });
 
   it('normalizes validation errors and rejects unknown fields', async () => {
@@ -235,6 +241,7 @@ describe('TBuddy F00/F01 API (e2e)', () => {
       .expect(200);
     const token = login.body.data.accessToken as string;
     const authorization = `Bearer ${token}`;
+    patientAuthorization = authorization;
 
     const me = await request(app.getHttpServer())
       .get('/api/v1/auth/me')
@@ -299,5 +306,217 @@ describe('TBuddy F00/F01 API (e2e)', () => {
       .send({ identifier: supporter.email, password: supporter.password })
       .expect(401);
     expect(inactive.body.code).toBe('INVALID_CREDENTIALS');
+  });
+
+  describe('F07 health facilities and maps', () => {
+    const nearbyId = new ObjectId();
+    const tbId = new ObjectId();
+    const farId = new ObjectId();
+
+    beforeAll(async () => {
+      if (!patientAuthorization) {
+        const login = await request(app.getHttpServer())
+          .post('/api/v1/auth/login')
+          .send({ identifier: patient.email, password: patient.password })
+          .expect(200);
+        patientAuthorization = `Bearer ${login.body.data.accessToken as string}`;
+      }
+
+      const collection = Database.getDb(mongoUri, databaseName).collection(
+        'health_facilities',
+      );
+      await collection.deleteMany({});
+      const now = new Date();
+      await collection.insertMany([
+        {
+          _id: nearbyId,
+          name: 'Klinik Terdekat',
+          facility_type: 'Klinik Umum',
+          address: 'Jl. Dekat No. 1',
+          city: 'Jakarta',
+          province: 'DKI Jakarta',
+          phone_number: null,
+          latitude: -6.2088,
+          longitude: 106.8456,
+          location: {
+            type: 'Point',
+            coordinates: [106.8456, -6.2088],
+          },
+          operating_hours: null,
+          source: 'e2e',
+          is_tb_service_available: false,
+          is_active: true,
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          _id: tbId,
+          name: 'Puskesmas TB',
+          facility_type: 'Puskesmas',
+          address: 'Jl. TB No. 2',
+          city: 'Jakarta',
+          province: 'DKI Jakarta',
+          phone_number: '(021) 123456',
+          latitude: -6.2178,
+          longitude: 106.8456,
+          location: {
+            type: 'Point',
+            coordinates: [106.8456, -6.2178],
+          },
+          operating_hours: 'Senin-Jumat 08:00-16:00',
+          source: 'e2e',
+          is_tb_service_available: true,
+          is_active: true,
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          _id: farId,
+          name: 'Rumah Sakit Jauh',
+          facility_type: 'Rumah Sakit',
+          address: 'Jl. Jauh No. 3',
+          city: 'Bogor',
+          province: 'Jawa Barat',
+          phone_number: '(0251) 123456',
+          latitude: -6.4088,
+          longitude: 106.8456,
+          location: {
+            type: 'Point',
+            coordinates: [106.8456, -6.4088],
+          },
+          operating_hours: '24 jam',
+          source: 'e2e',
+          is_tb_service_available: true,
+          is_active: true,
+          created_at: now,
+          updated_at: now,
+        },
+      ]);
+    });
+
+    it('protects facility endpoints', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/facilities')
+        .expect(401);
+
+      expect(response.body.code).toBe('UNAUTHORIZED');
+    });
+
+    it('lists paginated camelCase summaries and prioritizes TB services', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/facilities?page=1&limit=2')
+        .set('Authorization', patientAuthorization)
+        .expect(200);
+
+      expect(response.body.meta).toEqual({
+        page: 1,
+        limit: 2,
+        totalItems: 3,
+        totalPages: 2,
+        hasNextPage: true,
+        hasPreviousPage: false,
+      });
+      expect(response.body.data).toHaveLength(2);
+      expect(
+        response.body.data.every(
+          (facility: { isTbServiceAvailable: boolean }) =>
+            facility.isTbServiceAvailable,
+        ),
+      ).toBe(true);
+      expect(response.body.data[0]).toEqual(
+        expect.objectContaining({
+          id: expect.any(String),
+          facilityType: expect.any(String),
+          isTbServiceAvailable: true,
+        }),
+      );
+      expect(response.body.data[0]._id).toBeUndefined();
+      expect(response.body.data[0].facility_type).toBeUndefined();
+    });
+
+    it('filters the facility list by city, type, and TB service', async () => {
+      const response = await request(app.getHttpServer())
+        .get(
+          '/api/v1/facilities?city=jakarta&facilityType=Puskesmas&isTbServiceAvailable=true',
+        )
+        .set('Authorization', patientAuthorization)
+        .expect(200);
+
+      expect(response.body.data).toHaveLength(1);
+      expect(response.body.data[0].id).toBe(tbId.toHexString());
+    });
+
+    it('orders nearby facilities by distance and respects radius and filters', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/facilities/nearby?lat=-6.2088&lng=106.8456&radius=5000')
+        .set('Authorization', patientAuthorization)
+        .expect(200);
+
+      expect(
+        response.body.data.map((facility: { id: string }) => facility.id),
+      ).toEqual([nearbyId.toHexString(), tbId.toHexString()]);
+      expect(response.body.data[0].distanceKm).toBeLessThanOrEqual(
+        response.body.data[1].distanceKm,
+      );
+
+      const tbOnly = await request(app.getHttpServer())
+        .get(
+          '/api/v1/facilities/nearby?lat=-6.2088&lng=106.8456&radius=5000&isTbServiceAvailable=true&limit=1',
+        )
+        .set('Authorization', patientAuthorization)
+        .expect(200);
+      expect(tbOnly.body.data).toHaveLength(1);
+      expect(tbOnly.body.data[0].id).toBe(tbId.toHexString());
+
+      const empty = await request(app.getHttpServer())
+        .get('/api/v1/facilities/nearby?lat=-7.2088&lng=106.8456&radius=100')
+        .set('Authorization', patientAuthorization)
+        .expect(200);
+      expect(empty.body).toEqual({ data: [] });
+    });
+
+    it('returns the feature error code for invalid coordinates', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/facilities/nearby?lat=91&lng=106.8456')
+        .set('Authorization', patientAuthorization)
+        .expect(400);
+
+      expect(response.body.code).toBe('INVALID_COORDINATES');
+    });
+
+    it('returns detail data without leaking database field names', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/v1/facilities/${tbId.toHexString()}`)
+        .set('Authorization', patientAuthorization)
+        .expect(200);
+
+      expect(response.body.data).toEqual(
+        expect.objectContaining({
+          id: tbId.toHexString(),
+          name: 'Puskesmas TB',
+          operatingHours: 'Senin-Jumat 08:00-16:00',
+          source: 'e2e',
+        }),
+      );
+      expect(response.body.data._id).toBeUndefined();
+      expect(response.body.data.operating_hours).toBeUndefined();
+    });
+
+    it('seeds facilities idempotently without duplicates', async () => {
+      const service = app.get(FacilitiesService);
+      const first = await service.seedFacilities();
+      const countAfterFirst = await Database.getDb(mongoUri, databaseName)
+        .collection('health_facilities')
+        .countDocuments();
+      const second = await service.seedFacilities();
+      const countAfterSecond = await Database.getDb(mongoUri, databaseName)
+        .collection('health_facilities')
+        .countDocuments();
+
+      expect(first.insertedCount).toBeGreaterThan(0);
+      expect(second.insertedCount).toBe(0);
+      expect(second.existingCount).toBeGreaterThan(0);
+      expect(countAfterSecond).toBe(countAfterFirst);
+    });
   });
 });

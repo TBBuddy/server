@@ -1,15 +1,20 @@
 import { IMongoloquentSchema, Model } from 'mongoloquent';
 
-export type StockLogReason = 'CHECK_IN' | 'RESTOCK' | 'ADJUSTMENT' | 'TRAVEL_PREPARATION';
+export type StockLogReason =
+  | 'CHECK_IN'
+  | 'RESTOCK'
+  | 'ADJUSTMENT'
+  | 'TRAVEL_PREPARATION';
 
 export interface IMedicineStockLog extends IMongoloquentSchema {
   medicine_stock_id: string;
   patient_id: string;
-  change_quantity: number;    // negatif jika dikonsumsi, positif jika restock
+  change_quantity: number;
   previous_quantity: number;
   current_quantity: number;
   reason: StockLogReason;
   note: string | null;
+  operation_key: string | null;
   created_at?: Date;
 }
 

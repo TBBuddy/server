@@ -18,17 +18,23 @@ export class ListMedicineStocksQueryDto {
   @Type(() => Number)
   limit?: number = 20;
 
-  @ApiPropertyOptional({ example: true, description: 'Filter stok aktif/nonaktif. Default: true (hanya aktif)' })
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Filter stok aktif/nonaktif. Default: true (hanya aktif)',
+  })
   @IsOptional()
   @IsBoolean()
-  @Transform(({ value }) => {
+  @Transform(({ value }: { value: unknown }): unknown => {
     if (value === 'true') return true;
     if (value === 'false') return false;
     return value;
   })
   isActive?: boolean = true;
 
-  @ApiPropertyOptional({ enum: ['createdAt', 'medicineName', 'quantity'], default: 'createdAt' })
+  @ApiPropertyOptional({
+    enum: ['createdAt', 'medicineName', 'quantity'],
+    default: 'createdAt',
+  })
   @IsOptional()
   @IsIn(['createdAt', 'medicineName', 'quantity'])
   sortBy?: string = 'createdAt';
