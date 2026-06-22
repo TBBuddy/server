@@ -16,6 +16,10 @@ import { PatientsModule } from './patients/patients.module';
 import { MedicineStocksModule } from './medicine-stocks/medicine-stocks.module';
 import { HealthFacility } from './facilities/health-facility.model';
 import { FacilitiesModule } from './facilities/facilities.module';
+import { Symptom } from './checkins/models/symptom.model';
+import { DailyCheckin } from './checkins/models/daily-checkin.model';
+import { CheckinSymptom } from './checkins/models/checkin-symptom.model';
+import { CheckinsModule } from './checkins/checkins.module';
 
 @Module({
   imports: [
@@ -27,7 +31,7 @@ import { FacilitiesModule } from './facilities/facilities.module';
     MongoloquentModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      models: [User, HealthFacility],
+      models: [User, HealthFacility, Symptom, DailyCheckin, CheckinSymptom],
       global: true,
       useFactory: (config: ConfigService) => ({
         connection: config.getOrThrow<string>('MONGODB_CONNECTION'),
@@ -62,6 +66,7 @@ import { FacilitiesModule } from './facilities/facilities.module';
     PatientsModule,
     MedicineStocksModule,
     FacilitiesModule,
+    CheckinsModule,
   ],
   providers: [
     RequestContextMiddleware,
