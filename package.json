@@ -20,7 +20,8 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
-    "seed:admin": "ts-node -r tsconfig-paths/register src/database/seed-admin.ts"
+    "seed:admin": "ts-node -r tsconfig-paths/register src/database/seed-admin.ts",
+    "seed:facilities": "ts-node --transpile-only -r tsconfig-paths/register src/facilities/seed/seed-facilities.ts"
   },
   "dependencies": {
     "@mongoloquent/nestjs": "^1.2.0",
