@@ -12,6 +12,9 @@ import { HealthModule } from './health/health.module';
 import { RedisModule } from './redis/redis.module';
 import { User } from './users/user.model';
 import { UsersModule } from './users/users.module';
+import { PatientsModule } from './patients/patients.module';
+import { HealthFacility } from './facilities/health-facility.model';
+import { FacilitiesModule } from './facilities/facilities.module';
 
 @Module({
   imports: [
@@ -23,7 +26,7 @@ import { UsersModule } from './users/users.module';
     MongoloquentModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      models: [User],
+      models: [User, HealthFacility],
       global: true,
       useFactory: (config: ConfigService) => ({
         connection: config.getOrThrow<string>('MONGODB_CONNECTION'),
@@ -35,6 +38,7 @@ import { UsersModule } from './users/users.module';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
+        prefix: config.getOrThrow<string>('REDIS_PREFIX'),
         connection: {
           host: config.getOrThrow<string>('REDIS_HOST'),
           port: config.getOrThrow<number>('REDIS_PORT'),
@@ -54,6 +58,8 @@ import { UsersModule } from './users/users.module';
     UsersModule,
     AuthModule,
     HealthModule,
+    PatientsModule,
+    FacilitiesModule,
   ],
   providers: [
     RequestContextMiddleware,
