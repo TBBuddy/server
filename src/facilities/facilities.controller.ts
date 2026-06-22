@@ -7,15 +7,14 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
-import { DataResponse } from '../common/dto/data-response.dto';
 import {
-  FacilityResponseDto,
-  NearbyFacilityResponseDto,
+  HealthFacilityDetailDataResponseDto,
+  NearbyHealthFacilityDataResponseDto,
+  PaginatedHealthFacilityResponseDto,
 } from './dto/facility-response.dto';
 import { GetFacilitiesDto } from './dto/get-facilities.dto';
 import { GetNearbyFacilitiesDto } from './dto/get-nearby-facilities.dto';
 import { FacilitiesService } from './facilities.service';
-import { IHealthFacility } from './health-facility.model';
 
 @ApiTags('Facilities')
 @ApiBearerAuth()
@@ -25,28 +24,29 @@ export class FacilitiesController {
 
   @Get()
   @HttpCode(HttpStatus.OK)
-  @ApiOkResponse({ type: FacilityResponseDto, isArray: true })
-  async findAll(
+  @ApiOkResponse({ type: PaginatedHealthFacilityResponseDto })
+  findAll(
     @Query() dto: GetFacilitiesDto,
-  ): Promise<DataResponse<IHealthFacility[]>> {
-    const data = await this.facilitiesService.findAll(dto);
-    return { data };
+  ): Promise<PaginatedHealthFacilityResponseDto> {
+    return this.facilitiesService.findAll(dto);
   }
 
   @Get('nearby')
   @HttpCode(HttpStatus.OK)
-  @ApiOkResponse({ type: NearbyFacilityResponseDto, isArray: true })
-  async findNearby(@Query() dto: GetNearbyFacilitiesDto) {
+  @ApiOkResponse({ type: NearbyHealthFacilityDataResponseDto })
+  async findNearby(
+    @Query() dto: GetNearbyFacilitiesDto,
+  ): Promise<NearbyHealthFacilityDataResponseDto> {
     const data = await this.facilitiesService.findNearby(dto);
     return { data };
   }
 
   @Get(':id')
   @HttpCode(HttpStatus.OK)
-  @ApiOkResponse({ type: FacilityResponseDto })
+  @ApiOkResponse({ type: HealthFacilityDetailDataResponseDto })
   async findById(
     @Param('id') id: string,
-  ): Promise<DataResponse<IHealthFacility>> {
+  ): Promise<HealthFacilityDetailDataResponseDto> {
     const data = await this.facilitiesService.findById(id);
     return { data };
   }

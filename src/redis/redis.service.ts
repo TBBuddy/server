@@ -20,11 +20,13 @@ export class RedisService implements OnApplicationShutdown {
     if (!this.client) {
       const password =
         this.configService.get<string>('REDIS_PASSWORD') || undefined;
+      const prefix = this.configService.getOrThrow<string>('REDIS_PREFIX');
       this.client = new Redis({
         host: this.configService.getOrThrow<string>('REDIS_HOST'),
         port: this.configService.getOrThrow<number>('REDIS_PORT'),
         username: this.configService.get<string>('REDIS_USERNAME') || undefined,
         password,
+        keyPrefix: `${prefix}:`,
         lazyConnect: true,
         maxRetriesPerRequest: 1,
         enableOfflineQueue: false,

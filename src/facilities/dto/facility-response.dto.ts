@@ -1,14 +1,14 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export class FacilityResponseDto {
+export class HealthFacilitySummaryResponseDto {
   @ApiProperty()
-  _id!: string;
+  id!: string;
 
   @ApiProperty()
   name!: string;
 
   @ApiProperty()
-  facility_type!: string;
+  facilityType!: string;
 
   @ApiProperty()
   address!: string;
@@ -19,8 +19,8 @@ export class FacilityResponseDto {
   @ApiProperty()
   province!: string;
 
-  @ApiProperty({ nullable: true })
-  phone_number!: string | null;
+  @ApiPropertyOptional({ nullable: true })
+  phoneNumber!: string | null;
 
   @ApiProperty()
   latitude!: number;
@@ -28,26 +28,63 @@ export class FacilityResponseDto {
   @ApiProperty()
   longitude!: number;
 
-  @ApiProperty({ nullable: true })
-  operating_hours!: string | null;
+  @ApiProperty()
+  isTbServiceAvailable!: boolean;
+}
+
+export class HealthFacilityDetailResponseDto extends HealthFacilitySummaryResponseDto {
+  @ApiPropertyOptional({ nullable: true })
+  operatingHours!: string | null;
 
   @ApiProperty()
   source!: string;
 
-  @ApiProperty()
-  is_tb_service_available!: boolean;
+  @ApiPropertyOptional({ type: String, format: 'date-time' })
+  createdAt?: Date;
 
-  @ApiProperty()
-  is_active!: boolean;
-
-  @ApiProperty()
-  created_at!: Date;
-
-  @ApiProperty()
-  updated_at!: Date;
+  @ApiPropertyOptional({ type: String, format: 'date-time' })
+  updatedAt?: Date;
 }
 
-export class NearbyFacilityResponseDto extends FacilityResponseDto {
-  @ApiProperty({ description: 'Jarak dari koordinat input, dalam kilometer' })
-  distance_km!: number;
+export class NearbyHealthFacilityResponseDto extends HealthFacilitySummaryResponseDto {
+  @ApiProperty({ description: 'Jarak dari koordinat input dalam kilometer.' })
+  distanceKm!: number;
+}
+
+export class PaginationMetaDto {
+  @ApiProperty()
+  page!: number;
+
+  @ApiProperty()
+  limit!: number;
+
+  @ApiProperty()
+  totalItems!: number;
+
+  @ApiProperty()
+  totalPages!: number;
+
+  @ApiProperty()
+  hasNextPage!: boolean;
+
+  @ApiProperty()
+  hasPreviousPage!: boolean;
+}
+
+export class PaginatedHealthFacilityResponseDto {
+  @ApiProperty({ type: [HealthFacilitySummaryResponseDto] })
+  data!: HealthFacilitySummaryResponseDto[];
+
+  @ApiProperty({ type: PaginationMetaDto })
+  meta!: PaginationMetaDto;
+}
+
+export class NearbyHealthFacilityDataResponseDto {
+  @ApiProperty({ type: [NearbyHealthFacilityResponseDto] })
+  data!: NearbyHealthFacilityResponseDto[];
+}
+
+export class HealthFacilityDetailDataResponseDto {
+  @ApiProperty({ type: HealthFacilityDetailResponseDto })
+  data!: HealthFacilityDetailResponseDto;
 }

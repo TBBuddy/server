@@ -3,7 +3,10 @@ import { IUser } from '../user.model';
 import { AuthSessionUserDto } from '../dto/user-response.dto';
 
 export class UserSerializer {
-  static toAuthSession(user: IUser): AuthSessionUserDto {
+  static toAuthSession(
+    user: IUser,
+    hasPatientProfile: boolean,
+  ): AuthSessionUserDto {
     return {
       id: user._id.toHexString(),
       email: user.email,
@@ -16,7 +19,8 @@ export class UserSerializer {
       isVerified: user.is_verified,
       isActive: user.is_active,
       // F02 replaces this derivation with patient-profile existence.
-      isOnboardingCompleted: user.role !== UserRole.PATIENT,
+      isOnboardingCompleted:
+        user.role !== UserRole.PATIENT ? true : hasPatientProfile,
       createdAt: user.created_at,
       updatedAt: user.updated_at,
     };

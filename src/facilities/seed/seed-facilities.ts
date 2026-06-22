@@ -11,7 +11,9 @@ async function seedFacilities(): Promise<void> {
 
   try {
     const result = await app.get(FacilitiesService).seedFacilities();
-    logger.log(`Seed facilities: ${result}.`);
+    logger.log(
+      `Seed facilities: ${result.insertedCount} inserted, ${result.existingCount} already existed.`,
+    );
   } finally {
     await app.close();
   }

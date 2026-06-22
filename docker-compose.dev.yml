@@ -1,0 +1,11 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tbuddy-dev
+    env_file:
+      - .env.dev
+    ports:
+      - "3001:3000"
+    restart: unless-stopped

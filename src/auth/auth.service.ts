@@ -13,11 +13,13 @@ import { LoginDataDto } from './dto/login-response.dto';
 import { LogoutDto } from './dto/logout.dto';
 import { RegisterDto } from './dto/register.dto';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
+import { PatientsIndexService } from '../patients/patients-index.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
+    private readonly patientsIndexService: PatientsIndexService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
@@ -52,11 +54,13 @@ export class AuthService {
     const accessToken = await this.jwtService.signAsync(payload);
     await this.usersService.markLogin(payload.sub);
 
+    const hasProfile = await this.patientsIndexService.hasProfile(payload.sub);
+
     return {
       data: {
         accessToken,
         expiresIn: this.configService.getOrThrow<number>('JWT_EXPIRES_IN'),
-        user: UserSerializer.toAuthSession(user),
+        user: UserSerializer.toAuthSession(user, hasProfile),
       },
     };
   }
@@ -65,7 +69,12 @@ export class AuthService {
     currentUser: AuthenticatedUser,
   ): Promise<DataResponse<AuthSessionUserDto>> {
     const user = await this.usersService.requireById(currentUser.id);
-    return { data: UserSerializer.toAuthSession(user) };
+
+    const hasProfile = await this.patientsIndexService.hasProfile(
+      currentUser.id,
+    );
+
+    return { data: UserSerializer.toAuthSession(user, hasProfile) };
   }
 
   async logout(currentUser: AuthenticatedUser, dto: LogoutDto): Promise<void> {

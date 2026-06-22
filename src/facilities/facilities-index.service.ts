@@ -27,6 +27,11 @@ export class FacilitiesIndexService implements OnApplicationBootstrap {
         key: { is_tb_service_available: 1 },
         name: 'health_facilities_tb_service',
       },
+      {
+        key: { name: 1, city: 1, address: 1 },
+        name: 'health_facilities_seed_identity',
+        unique: true,
+      },
     ]);
   }
 }

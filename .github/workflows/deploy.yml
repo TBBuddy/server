@@ -1,0 +1,96 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - development
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Select deployment target
+        id: target
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+            echo "directory=/opt/tbuddy/prod" >> "$GITHUB_OUTPUT"
+            echo "compose_file=docker-compose.prod.yml" >> "$GITHUB_OUTPUT"
+            echo "health_url=http://127.0.0.1:3000/api/v1/health" >> "$GITHUB_OUTPUT"
+          else
+            echo "directory=/opt/tbuddy/dev" >> "$GITHUB_OUTPUT"
+            echo "compose_file=docker-compose.dev.yml" >> "$GITHUB_OUTPUT"
+            echo "health_url=http://127.0.0.1:3001/api/v1/health" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$VPS_PORT" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Ensure deployment directory exists
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          TARGET_DIRECTORY: ${{ steps.target.outputs.directory }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" \
+            "$VPS_USER@$VPS_HOST" \
+            "mkdir -p '$TARGET_DIRECTORY'"
+
+      - name: Sync application files
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          TARGET_DIRECTORY: ${{ steps.target.outputs.directory }}
+        run: |
+          rsync -az --delete \
+            --exclude='.git/' \
+            --exclude='node_modules/' \
+            --exclude='dist/' \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            -e "ssh -i ~/.ssh/deploy_key -p $VPS_PORT" \
+            ./ "$VPS_USER@$VPS_HOST:$TARGET_DIRECTORY/"
+
+      - name: Build and deploy application
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          TARGET_DIRECTORY: ${{ steps.target.outputs.directory }}
+          COMPOSE_FILE: ${{ steps.target.outputs.compose_file }}
+          HEALTH_URL: ${{ steps.target.outputs.health_url }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" \
+            "$VPS_USER@$VPS_HOST" \
+            "cd '$TARGET_DIRECTORY' && \
+             docker compose -f '$COMPOSE_FILE' up -d --build && \
+             curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 3 '$HEALTH_URL' && \
+             docker image prune -f"
