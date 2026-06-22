@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsInt, IsNotEmpty, IsString, MaxLength, IsNegative, IsPositive } from 'class-validator';
+import { IsInt, IsNotEmpty, IsString, MaxLength, NotEquals } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class AdjustMedicineDto {
@@ -8,6 +8,7 @@ export class AdjustMedicineDto {
     description: 'Perubahan jumlah tablet. Negatif jika mengurangi, positif jika menambah.',
   })
   @IsInt()
+  @NotEquals(0, { message: 'changeQuantity tidak boleh 0.' })
   @Type(() => Number)
   changeQuantity!: number;
 

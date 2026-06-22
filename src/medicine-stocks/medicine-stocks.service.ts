@@ -125,6 +125,15 @@ export class MedicineStocksService {
     dto: UpdateMedicineStockDto,
   ): Promise<void> {
     const stock = await this.findOne(userId, stockId);
+
+    if (!stock.is_active) {
+      throw new AppException(
+        400,
+        'BUSINESS_RULE_VIOLATION',
+        'Stok tidak aktif.',
+      );
+    }
+
     const changes: Partial<IMedicineStock> = {};
 
     if (dto.medicineName !== undefined) changes.medicine_name = dto.medicineName;
@@ -191,6 +200,11 @@ export class MedicineStocksService {
         note: null,
       });
     });
+
+    // Alert fires AFTER transaction commits — handles edge case where restock quantity is still below threshold
+    if (newQuantity <= stock.threshold_quantity) {
+      await this.fireStockAlert(userId, stockId);
+    }
   }
 
   async adjust(
