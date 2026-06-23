@@ -3,6 +3,7 @@ import { SeverityLevel } from '../../common/enums/severity-level.enum';
 
 export interface IDailyCheckin extends IMongoloquentSchema {
   patient_id: string;
+  patient_profile_id: string;
   checkin_date: Date;
   treatment_day_number: number;
   has_taken_medicine: boolean;

@@ -1,11 +1,13 @@
-import { UserRole } from '../../common/enums/user-role.enum';
 import { IUser } from '../user.model';
 import { AuthSessionUserDto } from '../dto/user-response.dto';
 
 export class UserSerializer {
   static toAuthSession(
     user: IUser,
-    hasPatientProfile: boolean,
+    patientState: {
+      hasActivePatientProfile: boolean;
+      hasPatientHistory: boolean;
+    },
   ): AuthSessionUserDto {
     return {
       id: user._id.toHexString(),
@@ -18,9 +20,9 @@ export class UserSerializer {
       treatmentStatus: user.treatment_status,
       isVerified: user.is_verified,
       isActive: user.is_active,
-      // F02 replaces this derivation with patient-profile existence.
-      isOnboardingCompleted:
-        user.role !== UserRole.PATIENT ? true : hasPatientProfile,
+      isOnboardingCompleted: patientState.hasActivePatientProfile,
+      hasActivePatientProfile: patientState.hasActivePatientProfile,
+      hasPatientHistory: patientState.hasPatientHistory,
       createdAt: user.created_at,
       updatedAt: user.updated_at,
     };

@@ -54,13 +54,15 @@ export class AuthService {
     const accessToken = await this.jwtService.signAsync(payload);
     await this.usersService.markLogin(payload.sub);
 
-    const hasProfile = await this.patientsIndexService.hasProfile(payload.sub);
+    const patientState = await this.patientsIndexService.getPatientState(
+      payload.sub,
+    );
 
     return {
       data: {
         accessToken,
         expiresIn: this.configService.getOrThrow<number>('JWT_EXPIRES_IN'),
-        user: UserSerializer.toAuthSession(user, hasProfile),
+        user: UserSerializer.toAuthSession(user, patientState),
       },
     };
   }
@@ -70,11 +72,11 @@ export class AuthService {
   ): Promise<DataResponse<AuthSessionUserDto>> {
     const user = await this.usersService.requireById(currentUser.id);
 
-    const hasProfile = await this.patientsIndexService.hasProfile(
+    const patientState = await this.patientsIndexService.getPatientState(
       currentUser.id,
     );
 
-    return { data: UserSerializer.toAuthSession(user, hasProfile) };
+    return { data: UserSerializer.toAuthSession(user, patientState) };
   }
 
   async logout(currentUser: AuthenticatedUser, dto: LogoutDto): Promise<void> {

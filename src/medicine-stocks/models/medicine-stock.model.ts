@@ -2,6 +2,7 @@ import { IMongoloquentSchema, Model } from 'mongoloquent';
 
 export interface IMedicineStock extends IMongoloquentSchema {
   patient_id: string;
+  patient_profile_id: string;
   medicine_name: string;
   medicine_type: string | null;
   quantity: number;

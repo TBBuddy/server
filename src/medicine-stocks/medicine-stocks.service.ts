@@ -9,8 +9,9 @@ import {
   ObjectId,
   WithId,
 } from 'mongodb';
-import { DB, Database } from 'mongoloquent';
 import { AppException } from '../common/exceptions/app.exception';
+import { runTransaction } from '../database/run-transaction';
+import { PatientsIndexService } from '../patients/patients-index.service';
 import { AdjustMedicineDto } from './dto/adjust-medicine.dto';
 import { CreateMedicineStockDto } from './dto/create-medicine-stock.dto';
 import { ListMedicineStocksQueryDto } from './dto/list-medicine-stocks-query.dto';
@@ -33,10 +34,12 @@ export class MedicineStocksService {
     private readonly stockModel: typeof MedicineStock,
     @InjectModel(MedicineStockLog)
     private readonly stockLogModel: typeof MedicineStockLog,
+    private readonly patientsIndex: PatientsIndexService,
     private readonly configService: ConfigService,
   ) {}
 
   async create(userId: string, dto: CreateMedicineStockDto): Promise<void> {
+    const patientProfileId = await this.activeProfileId(userId);
     const threshold = dto.thresholdQuantity ?? 7;
     const nextEmptyDate = this.recalculateEmptyDate(
       dto.quantity,
@@ -45,11 +48,12 @@ export class MedicineStocksService {
     const stockId = new ObjectId();
     const now = new Date();
 
-    await DB.transaction(async (session) => {
+    await this.transaction(async (session) => {
       await this.stocks().insertOne(
         {
           _id: stockId,
           patient_id: userId,
+          patient_profile_id: patientProfileId,
           medicine_name: dto.medicineName,
           medicine_type: dto.medicineType ?? null,
           quantity: dto.quantity,
@@ -70,6 +74,7 @@ export class MedicineStocksService {
           _id: new ObjectId(),
           medicine_stock_id: stockId.toHexString(),
           patient_id: userId,
+          patient_profile_id: patientProfileId,
           change_quantity: dto.quantity,
           previous_quantity: 0,
           current_quantity: dto.quantity,
@@ -91,6 +96,7 @@ export class MedicineStocksService {
     userId: string,
     query: ListMedicineStocksQueryDto,
   ): Promise<{ stocks: IMedicineStock[]; total: number }> {
+    const patientProfileId = await this.activeProfileId(userId);
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const isActive = query.isActive ?? true;
@@ -104,10 +110,12 @@ export class MedicineStocksService {
 
     const total = await this.stockModel
       .where('patient_id', userId)
+      .where('patient_profile_id', patientProfileId)
       .where('is_active', isActive)
       .count();
     const stocks = await this.stockModel
       .where('patient_id', userId)
+      .where('patient_profile_id', patientProfileId)
       .where('is_active', isActive)
       .orderBy(sortField, sortOrder)
       .offset((page - 1) * limit)
@@ -118,10 +126,12 @@ export class MedicineStocksService {
   }
 
   async findOne(userId: string, stockId: string): Promise<IMedicineStock> {
+    const patientProfileId = await this.activeProfileId(userId);
     const objectId = this.parseStockId(stockId);
     const stock = await this.stockModel
       .where('_id', objectId)
       .where('patient_id', userId)
+      .where('patient_profile_id', patientProfileId)
       .first();
 
     if (!stock) {
@@ -172,6 +182,7 @@ export class MedicineStocksService {
     await this.stockModel
       .where('_id', this.parseStockId(stockId))
       .where('patient_id', userId)
+      .where('patient_profile_id', stock.patient_profile_id)
       .update(changes);
 
     const newThreshold = dto.thresholdQuantity ?? stock.threshold_quantity;
@@ -190,12 +201,14 @@ export class MedicineStocksService {
     idempotencyKey: string,
   ): Promise<void> {
     this.validateIdempotencyKey(idempotencyKey);
+    const patientProfileId = await this.activeProfileId(userId);
     const objectId = this.parseStockId(stockId);
 
     try {
-      await DB.transaction(async (session) => {
+      await this.transaction(async (session) => {
         const existing = await this.findOperation(
           userId,
+          patientProfileId,
           stockId,
           'RESTOCK',
           idempotencyKey,
@@ -206,7 +219,12 @@ export class MedicineStocksService {
           return;
         }
 
-        const stock = await this.findOwnedStock(userId, objectId, session);
+        const stock = await this.findOwnedStock(
+          userId,
+          patientProfileId,
+          objectId,
+          session,
+        );
         if (!stock.is_active) {
           throw this.inactiveStock();
         }
@@ -214,7 +232,11 @@ export class MedicineStocksService {
         const newQuantity = stock.quantity + dto.quantity;
         const now = new Date();
         await this.stocks().updateOne(
-          { _id: objectId, patient_id: userId },
+          {
+            _id: objectId,
+            patient_id: userId,
+            patient_profile_id: patientProfileId,
+          },
           {
             $set: {
               quantity: newQuantity,
@@ -232,6 +254,7 @@ export class MedicineStocksService {
           {
             medicine_stock_id: stockId,
             patient_id: userId,
+            patient_profile_id: patientProfileId,
             change_quantity: dto.quantity,
             previous_quantity: stock.quantity,
             current_quantity: newQuantity,
@@ -246,6 +269,7 @@ export class MedicineStocksService {
       if (this.isDuplicateKey(error)) {
         await this.resolveConcurrentDuplicate(
           userId,
+          patientProfileId,
           stockId,
           'RESTOCK',
           idempotencyKey,
@@ -265,13 +289,15 @@ export class MedicineStocksService {
     idempotencyKey: string,
   ): Promise<void> {
     this.validateIdempotencyKey(idempotencyKey);
+    const patientProfileId = await this.activeProfileId(userId);
     const objectId = this.parseStockId(stockId);
     let thresholdCrossed = false;
 
     try {
-      await DB.transaction(async (session) => {
+      await this.transaction(async (session) => {
         const existing = await this.findOperation(
           userId,
+          patientProfileId,
           stockId,
           'ADJUSTMENT',
           idempotencyKey,
@@ -282,7 +308,12 @@ export class MedicineStocksService {
           return;
         }
 
-        const stock = await this.findOwnedStock(userId, objectId, session);
+        const stock = await this.findOwnedStock(
+          userId,
+          patientProfileId,
+          objectId,
+          session,
+        );
         if (!stock.is_active) {
           throw this.inactiveStock();
         }
@@ -298,7 +329,11 @@ export class MedicineStocksService {
 
         const now = new Date();
         await this.stocks().updateOne(
-          { _id: objectId, patient_id: userId },
+          {
+            _id: objectId,
+            patient_id: userId,
+            patient_profile_id: patientProfileId,
+          },
           {
             $set: {
               quantity: newQuantity,
@@ -315,6 +350,7 @@ export class MedicineStocksService {
           {
             medicine_stock_id: stockId,
             patient_id: userId,
+            patient_profile_id: patientProfileId,
             change_quantity: dto.changeQuantity,
             previous_quantity: stock.quantity,
             current_quantity: newQuantity,
@@ -332,6 +368,7 @@ export class MedicineStocksService {
       if (this.isDuplicateKey(error)) {
         await this.resolveConcurrentDuplicate(
           userId,
+          patientProfileId,
           stockId,
           'ADJUSTMENT',
           idempotencyKey,
@@ -361,6 +398,7 @@ export class MedicineStocksService {
     await this.stockModel
       .where('_id', this.parseStockId(stockId))
       .where('patient_id', userId)
+      .where('patient_profile_id', stock.patient_profile_id)
       .update({ is_active: false });
   }
 
@@ -369,15 +407,17 @@ export class MedicineStocksService {
     stockId: string,
     query: ListStockLogsQueryDto,
   ): Promise<{ logs: IMedicineStockLog[]; total: number }> {
-    await this.findOne(userId, stockId);
+    const stock = await this.findOne(userId, stockId);
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     let countQuery = this.stockLogModel
       .where('medicine_stock_id', stockId)
-      .where('patient_id', userId);
+      .where('patient_id', userId)
+      .where('patient_profile_id', stock.patient_profile_id);
     let dataQuery = this.stockLogModel
       .where('medicine_stock_id', stockId)
-      .where('patient_id', userId);
+      .where('patient_id', userId)
+      .where('patient_profile_id', stock.patient_profile_id);
 
     if (query.reason !== undefined) {
       countQuery = countQuery.where('reason', query.reason);
@@ -396,17 +436,24 @@ export class MedicineStocksService {
 
   async consumeDailyDose(
     patientId: string,
+    patientProfileId: string,
     checkinId: string,
     session?: ClientSession,
   ): Promise<string[]> {
     if (session) {
-      return this.consumeDailyDoseInSession(patientId, checkinId, session);
+      return this.consumeDailyDoseInSession(
+        patientId,
+        patientProfileId,
+        checkinId,
+        session,
+      );
     }
 
     try {
-      return await DB.transaction((transactionSession) =>
+      return await this.transaction((transactionSession) =>
         this.consumeDailyDoseInSession(
           patientId,
+          patientProfileId,
           checkinId,
           transactionSession,
         ),
@@ -430,12 +477,14 @@ export class MedicineStocksService {
 
   private async consumeDailyDoseInSession(
     patientId: string,
+    patientProfileId: string,
     checkinId: string,
     session: ClientSession,
   ): Promise<string[]> {
     const existing = await this.logs().findOne(
       {
         patient_id: patientId,
+        patient_profile_id: patientProfileId,
         reason: 'CHECK_IN',
         operation_key: checkinId,
       },
@@ -446,7 +495,14 @@ export class MedicineStocksService {
     }
 
     const stocks = await this.stocks()
-      .find({ patient_id: patientId, is_active: true }, { session })
+      .find(
+        {
+          patient_id: patientId,
+          patient_profile_id: patientProfileId,
+          is_active: true,
+        },
+        { session },
+      )
       .toArray();
     const insufficient = stocks.find(
       (stock) => stock.daily_dose > 0 && stock.quantity < stock.daily_dose,
@@ -467,7 +523,11 @@ export class MedicineStocksService {
       const stockId = stock._id.toHexString();
       const newQuantity = stock.quantity - stock.daily_dose;
       await this.stocks().updateOne(
-        { _id: stock._id, patient_id: patientId },
+        {
+          _id: stock._id,
+          patient_id: patientId,
+          patient_profile_id: patientProfileId,
+        },
         {
           $set: {
             quantity: newQuantity,
@@ -484,6 +544,7 @@ export class MedicineStocksService {
         {
           medicine_stock_id: stockId,
           patient_id: patientId,
+          patient_profile_id: patientProfileId,
           change_quantity: -stock.daily_dose,
           previous_quantity: stock.quantity,
           current_quantity: newQuantity,
@@ -507,11 +568,16 @@ export class MedicineStocksService {
 
   private async findOwnedStock(
     userId: string,
+    patientProfileId: string,
     stockId: ObjectId,
     session: ClientSession,
   ): Promise<WithId<IMedicineStock>> {
     const stock = await this.stocks().findOne(
-      { _id: stockId, patient_id: userId },
+      {
+        _id: stockId,
+        patient_id: userId,
+        patient_profile_id: patientProfileId,
+      },
       { session },
     );
     if (!stock) {
@@ -522,6 +588,7 @@ export class MedicineStocksService {
 
   private async findOperation(
     patientId: string,
+    patientProfileId: string,
     stockId: string,
     reason: StockLogReason,
     operationKey: string,
@@ -530,6 +597,7 @@ export class MedicineStocksService {
     return this.logs().findOne(
       {
         patient_id: patientId,
+        patient_profile_id: patientProfileId,
         medicine_stock_id: stockId,
         reason,
         operation_key: operationKey,
@@ -540,6 +608,7 @@ export class MedicineStocksService {
 
   private async resolveConcurrentDuplicate(
     patientId: string,
+    patientProfileId: string,
     stockId: string,
     reason: StockLogReason,
     operationKey: string,
@@ -548,6 +617,7 @@ export class MedicineStocksService {
   ): Promise<void> {
     const existing = await this.findOperation(
       patientId,
+      patientProfileId,
       stockId,
       reason,
       operationKey,
@@ -642,18 +712,26 @@ export class MedicineStocksService {
     );
   }
 
+  private async activeProfileId(userId: string): Promise<string> {
+    const profile = await this.patientsIndex.getPatientProfile(userId);
+    return profile._id.toHexString();
+  }
+
   private stocks(): Collection<IMedicineStock> {
-    return this.database().collection<IMedicineStock>('medicine_stocks');
+    return this.stockModel
+      .query()
+      .getMongoDBCollection() as unknown as Collection<IMedicineStock>;
   }
 
   private logs(): Collection<IMedicineStockLog> {
-    return this.database().collection<IMedicineStockLog>('medicine_stock_logs');
+    return this.stockLogModel
+      .query()
+      .getMongoDBCollection() as unknown as Collection<IMedicineStockLog>;
   }
 
-  private database() {
-    return Database.getDb(
-      this.configService.getOrThrow<string>('MONGODB_CONNECTION'),
-      this.configService.getOrThrow<string>('MONGODB_DATABASE'),
-    );
+  private transaction<T>(
+    callback: (session: ClientSession) => Promise<T>,
+  ): Promise<T> {
+    return runTransaction(this.configService, callback);
   }
 }

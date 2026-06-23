@@ -9,7 +9,6 @@ import {
   Patch,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -19,12 +18,10 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
 import { UserRole } from '../common/enums/user-role.enum';
-import { RolesGuard } from '../common/guards/roles.guard';
 import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
 import { CheckinsService } from './checkins.service';
 import { CheckinIdParamDto } from './dto/checkin-id-param.dto';
@@ -38,7 +35,6 @@ import { UpdateCheckinDto } from './dto/update-checkin.dto';
 
 @ApiTags('checkins')
 @ApiBearerAuth()
-@UseGuards(AuthGuard, RolesGuard)
 @Roles(UserRole.PATIENT)
 @Controller('checkins')
 export class CheckinsController {

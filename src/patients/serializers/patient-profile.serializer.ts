@@ -2,6 +2,7 @@ import { IPatientProfile } from '../models/patient-profile.model';
 import { IPatientPmo } from '../models/patient-pmo.model';
 import {
   PatientDashboardResponseDto,
+  PatientHistorySummaryDto,
   PatientProfileResponseDto,
   PatientPmoResponseDto,
 } from '../dto/patient-response.dto';
@@ -28,6 +29,7 @@ export class PatientProfileSerializer {
     return {
       id: profile._id.toHexString(),
       userId: profile.user_id,
+      status: profile.status,
       diagnosisDate: profile.diagnosis_date,
       medicineTime: profile.medicine_time,
       treatmentStartDate: profile.treatment_start_date,
@@ -40,22 +42,47 @@ export class PatientProfileSerializer {
       longestStreak: profile.longest_streak,
       totalCheckins: profile.total_checkins,
       totalMissedDays: profile.total_missed_days,
+      endedAt: profile.ended_at,
+      endedReason: profile.ended_reason,
       pmos: pmos.map((p) => this.toPmo(p)),
       createdAt: profile.created_at,
       updatedAt: profile.updated_at,
     };
   }
 
-  static toDashboard(profile: IPatientProfile): PatientDashboardResponseDto {
+  static toHistorySummary(profile: IPatientProfile): PatientHistorySummaryDto {
+    return {
+      id: profile._id.toHexString(),
+      status: profile.status,
+      diagnosisDate: profile.diagnosis_date,
+      treatmentStartDate: profile.treatment_start_date,
+      estimatedTreatmentEndDate: profile.estimated_treatment_end_date,
+      endedAt: profile.ended_at,
+      endedReason: profile.ended_reason,
+      treatmentDurationMonths: profile.treatment_duration_months,
+      totalCheckins: profile.total_checkins,
+    };
+  }
+
+  static toDashboard(
+    profile: IPatientProfile,
+    state: {
+      stockDoses: number;
+      hasCheckedInToday: boolean;
+    },
+  ): PatientDashboardResponseDto {
     return {
       treatmentDayCount: profile.treatment_day_count,
       treatmentDurationMonths: profile.treatment_duration_months,
+      treatmentStartDate: profile.treatment_start_date,
       estimatedTreatmentEndDate: profile.estimated_treatment_end_date,
       medicineTime: profile.medicine_time,
       currentStreak: profile.current_streak,
       longestStreak: profile.longest_streak,
       totalCheckins: profile.total_checkins,
       totalMissedDays: profile.total_missed_days,
+      stockDoses: state.stockDoses,
+      hasCheckedInToday: state.hasCheckedInToday,
       todayCheckin: null,
       latestAssessment: null,
       stockAlert: null,
