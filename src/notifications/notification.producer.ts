@@ -29,13 +29,14 @@ export class NotificationProducer {
     private readonly queue: Queue<NotificationJobData>,
   ) {}
 
-  async enqueueSend(notificationId: string): Promise<string> {
+  async enqueueSend(notificationId: string, delayMs = 0): Promise<string> {
     const data: SendNotificationJobData = { notificationId };
     const job = await this.queue.add(
       NotificationJobName.SEND_NOTIFICATION,
       data,
       {
         jobId: `notification:${notificationId}:send`,
+        delay: delayMs,
         attempts: 3,
         backoff: { type: 'exponential', delay: 5000 },
         removeOnComplete: { age: 86400 },
@@ -179,7 +180,7 @@ export class NotificationProducer {
       NotificationJobName.TRAVEL_REMINDER_H1,
       data,
       {
-        jobId: `travel:${plan.patient_profile_id}:${plan.id}:h1`,
+        jobId: NotificationProducer.travelReminderJobId(plan.id),
         delay: this.delayMs(scheduledFor, now),
         attempts: 2,
         removeOnComplete: { age: 86400 },
@@ -239,12 +240,79 @@ export class NotificationProducer {
     });
   }
 
+  async cancelTravelReminder(travelPlanId: string): Promise<number> {
+    const job = await this.queue.getJob(
+      NotificationProducer.travelReminderJobId(travelPlanId),
+    );
+    if (!job) return 0;
+
+    await job.remove();
+    return 1;
+  }
+
+  async enqueueTestMedicineReminder(
+    data: MedicineReminderJobData,
+    delayMs: number,
+  ): Promise<string> {
+    const job = await this.queue.add(
+      NotificationJobName.MEDICINE_REMINDER,
+      data,
+      {
+        jobId: `notification-test:medicine:${data.patientProfileId}:${data.kind}:${Date.now()}`,
+        delay: delayMs,
+        attempts: 2,
+        removeOnComplete: { age: 86400 },
+        removeOnFail: true,
+      },
+    );
+    return String(job.id);
+  }
+
+  async enqueueTestMedicineSkipEvaluation(
+    data: MedicineSkipEvaluationJobData,
+    delayMs: number,
+  ): Promise<string> {
+    const job = await this.queue.add(
+      NotificationJobName.MEDICINE_SKIP_EVALUATION,
+      data,
+      {
+        jobId: `notification-test:medicine-skip:${data.patientProfileId}:${Date.now()}`,
+        delay: delayMs,
+        attempts: 2,
+        removeOnComplete: { age: 86400 },
+        removeOnFail: true,
+      },
+    );
+    return String(job.id);
+  }
+
+  async enqueueTestTravelReminder(
+    data: TravelReminderJobData,
+    delayMs: number,
+  ): Promise<string> {
+    const job = await this.queue.add(
+      NotificationJobName.TRAVEL_REMINDER_H1,
+      data,
+      {
+        jobId: `notification-test:travel:${data.travelPlanId}:${Date.now()}`,
+        delay: delayMs,
+        attempts: 2,
+        removeOnComplete: { age: 86400 },
+        removeOnFail: true,
+      },
+    );
+    return String(job.id);
+  }
   static medicineJobId(
     patientProfileId: string,
     kind: MedicineReminderKind | 'SKIP',
     reminderDate: string,
   ): string {
     return `medicine:${patientProfileId}:${kind.toLowerCase()}:${reminderDate}`;
+  }
+
+  static travelReminderJobId(travelPlanId: string): string {
+    return `travel-reminder-h1:${travelPlanId}`;
   }
 
   private async scheduleNextMedicineReminder(
