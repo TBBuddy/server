@@ -2,92 +2,97 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
   Patch,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiOkResponse,
   ApiCreatedResponse,
+  ApiHeader,
+  ApiOkResponse,
+  ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { AuthGuard } from '../auth/auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
+import { MessageResponseDto } from '../common/dto/message-response.dto';
 import { UserRole } from '../common/enums/user-role.enum';
 import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
 import { CheckinsService } from './checkins.service';
+import { CheckinIdParamDto } from './dto/checkin-id-param.dto';
+import {
+  DailyCheckinDataResponseDto,
+  PaginatedCheckinResponseDto,
+} from './dto/checkin-response.dto';
 import { CreateCheckinDto } from './dto/create-checkin.dto';
-import { UpdateCheckinDto } from './dto/update-checkin.dto';
 import { GetCheckinsDto } from './dto/get-checkins.dto';
-import { CheckinResponseDto } from './dto/checkin-response.dto';
+import { UpdateCheckinDto } from './dto/update-checkin.dto';
 
 @ApiTags('checkins')
 @ApiBearerAuth()
-@UseGuards(AuthGuard, RolesGuard)
 @Roles(UserRole.PATIENT)
 @Controller('checkins')
 export class CheckinsController {
-  constructor(private readonly checkinsService: CheckinsService) {}
+  constructor(private readonly service: CheckinsService) {}
 
   @Get()
-  @HttpCode(HttpStatus.OK)
-  @ApiOkResponse({ type: [CheckinResponseDto] })
-  async getCheckins(
+  @ApiOperation({ summary: 'Riwayat check-in pasien' })
+  @ApiOkResponse({ type: PaginatedCheckinResponseDto })
+  getCheckins(
     @CurrentUser() user: AuthenticatedUser,
     @Query() dto: GetCheckinsDto,
-  ): Promise<{ data: CheckinResponseDto[] }> {
-    const data = await this.checkinsService.getCheckins(user.id, dto);
-    return { data };
+  ): Promise<PaginatedCheckinResponseDto> {
+    return this.service.getCheckins(user.id, dto);
   }
 
   @Get('today')
-  @HttpCode(HttpStatus.OK)
-  @ApiOkResponse({ type: CheckinResponseDto })
-  async getTodayCheckin(
+  @ApiOperation({ summary: 'Check-in pasien hari ini' })
+  @ApiOkResponse({ type: DailyCheckinDataResponseDto })
+  async getToday(
     @CurrentUser() user: AuthenticatedUser,
-  ): Promise<{ data: CheckinResponseDto | null }> {
-    const data = await this.checkinsService.getTodayCheckin(user.id);
-    return { data };
+  ): Promise<DailyCheckinDataResponseDto> {
+    return { data: await this.service.getTodayCheckin(user.id) };
   }
 
   @Get(':id')
-  @HttpCode(HttpStatus.OK)
-  @ApiOkResponse({ type: CheckinResponseDto })
-  async getCheckinById(
+  @ApiOperation({ summary: 'Detail check-in pasien' })
+  @ApiOkResponse({ type: DailyCheckinDataResponseDto })
+  async getById(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-  ): Promise<{ data: CheckinResponseDto }> {
-    const data = await this.checkinsService.getCheckinById(user.id, id);
-    return { data };
+    @Param() params: CheckinIdParamDto,
+  ): Promise<DailyCheckinDataResponseDto> {
+    return { data: await this.service.getCheckinById(user.id, params.id) };
   }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @ApiCreatedResponse({ type: CheckinResponseDto })
-  async createCheckin(
+  @ApiOperation({ summary: 'Simpan check-in hari ini' })
+  @ApiHeader({ name: 'Idempotency-Key', required: true })
+  @ApiCreatedResponse({ type: MessageResponseDto })
+  async create(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateCheckinDto,
-  ): Promise<{ data: CheckinResponseDto }> {
-    const data = await this.checkinsService.createCheckin(user.id, dto);
-    return { data };
+    @Headers('idempotency-key') idempotencyKey: string,
+  ): Promise<MessageResponseDto> {
+    await this.service.createCheckin(user.id, dto, idempotencyKey);
+    return { message: 'Check-in hari ini berhasil disimpan.' };
   }
 
   @Patch(':id')
   @HttpCode(HttpStatus.OK)
-  @ApiOkResponse({ type: CheckinResponseDto })
-  async updateCheckin(
+  @ApiOperation({ summary: 'Koreksi check-in hari ini' })
+  @ApiOkResponse({ type: MessageResponseDto })
+  async update(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
+    @Param() params: CheckinIdParamDto,
     @Body() dto: UpdateCheckinDto,
-  ): Promise<{ data: CheckinResponseDto }> {
-    const data = await this.checkinsService.updateCheckin(user.id, id, dto);
-    return { data };
+  ): Promise<MessageResponseDto> {
+    await this.service.updateCheckin(user.id, params.id, dto);
+    return { message: 'Check-in berhasil diperbarui.' };
   }
 }

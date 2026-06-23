@@ -13,6 +13,7 @@ export class DailyTimelineItemDto {
 export class AiAssessmentResponseDto {
   @ApiProperty() _id!: string;
   @ApiProperty() patient_id!: string;
+  @ApiProperty() patient_profile_id!: string;
   @ApiProperty() period_start_date!: Date;
   @ApiProperty() period_end_date!: Date;
   @ApiProperty() analyzed_days!: number;

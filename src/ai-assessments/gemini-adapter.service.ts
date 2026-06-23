@@ -5,6 +5,7 @@ import {
   SchemaType,
   HarmCategory,
   HarmBlockThreshold,
+  FinishReason,
 } from '@google/generative-ai';
 import { AiRiskLevel } from '../common/enums/ai-risk-level.enum';
 import type { RedactedPayload } from './pii-redactor.service';
@@ -93,7 +94,7 @@ export class GeminiAdapterService {
 
     const candidate = response.candidates?.[0];
     const finishReason = candidate?.finishReason;
-    if (!candidate || (finishReason && finishReason !== 'STOP')) {
+    if (!candidate || (finishReason && finishReason !== FinishReason.STOP)) {
       throw new Error(
         `Gemini did not finish normally: ${finishReason ?? 'no candidate'}`,
       );

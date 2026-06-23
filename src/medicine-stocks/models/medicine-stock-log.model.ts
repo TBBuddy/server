@@ -9,6 +9,7 @@ export type StockLogReason =
 export interface IMedicineStockLog extends IMongoloquentSchema {
   medicine_stock_id: string;
   patient_id: string;
+  patient_profile_id: string;
   change_quantity: number;
   previous_quantity: number;
   current_quantity: number;

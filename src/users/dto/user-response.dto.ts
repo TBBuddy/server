@@ -36,6 +36,12 @@ export class AuthSessionUserDto {
   @ApiProperty()
   isOnboardingCompleted!: boolean;
 
+  @ApiProperty()
+  hasActivePatientProfile!: boolean;
+
+  @ApiProperty()
+  hasPatientHistory!: boolean;
+
   @ApiPropertyOptional({ type: String, format: 'date-time' })
   createdAt?: Date;
 

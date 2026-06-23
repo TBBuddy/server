@@ -1,7 +1,9 @@
 import { IMongoloquentSchema, Model } from 'mongoloquent';
+import { PatientProfileStatus } from '../../common/enums/patient-profile-status.enum';
 
 export interface IPatientProfile extends IMongoloquentSchema {
   user_id: string;
+  status: PatientProfileStatus;
   diagnosis_date: Date;
   medicine_time: string;
   treatment_start_date: Date | null;
@@ -14,6 +16,8 @@ export interface IPatientProfile extends IMongoloquentSchema {
   longest_streak: number;
   total_checkins: number;
   total_missed_days: number;
+  ended_at: Date | null;
+  ended_reason: string | null;
   created_at?: Date;
   updated_at?: Date;
 }

@@ -2,6 +2,7 @@ import { IMongoloquentSchema, Model } from 'mongoloquent';
 
 export interface IPatientPmo extends IMongoloquentSchema {
   patient_id: string;
+  patient_profile_id: string;
   name: string;
   relationship: string | null;
   phone_number: string | null;

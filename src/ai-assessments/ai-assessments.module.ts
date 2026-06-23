@@ -13,12 +13,23 @@ import { PiiRedactorService } from './pii-redactor.service';
 import { GeminiAdapterService } from './gemini-adapter.service';
 import { AI_ASSESSMENT_QUEUE } from './ai-assessment.queue';
 import { UsersModule } from '../users/users.module';
+import { PatientsModule } from '../patients/patients.module';
+import { DailyCheckin } from '../checkins/models/daily-checkin.model';
+import { CheckinSymptom } from '../checkins/models/checkin-symptom.model';
+import { Symptom } from '../checkins/models/symptom.model';
 
 @Module({
   imports: [
-    MongoloquentModule.forFeature([AiAssessment, AiAssessmentCheckinSymptom]),
+    MongoloquentModule.forFeature([
+      AiAssessment,
+      AiAssessmentCheckinSymptom,
+      DailyCheckin,
+      CheckinSymptom,
+      Symptom,
+    ]),
     BullModule.registerQueue({ name: AI_ASSESSMENT_QUEUE }),
     UsersModule,
+    PatientsModule,
   ],
   controllers: [AiAssessmentsController],
   providers: [

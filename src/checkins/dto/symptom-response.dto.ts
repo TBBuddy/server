@@ -1,10 +1,15 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SymptomResponseDto {
-  @ApiProperty() _id!: string;
+  @ApiProperty() id!: string;
   @ApiProperty() name!: string;
-  @ApiProperty({ nullable: true }) description!: string | null;
-  @ApiProperty({ nullable: true }) category!: string | null;
-  @ApiProperty() is_common_tb_symptom!: boolean;
-  @ApiProperty() is_possible_side_effect!: boolean;
+  @ApiPropertyOptional({ nullable: true }) description!: string | null;
+  @ApiPropertyOptional({ nullable: true }) category!: string | null;
+  @ApiProperty() isCommonTbSymptom!: boolean;
+  @ApiProperty() isPossibleSideEffect!: boolean;
+}
+
+export class SymptomListDataResponseDto {
+  @ApiProperty({ type: [SymptomResponseDto] })
+  data!: SymptomResponseDto[];
 }

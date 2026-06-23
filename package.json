@@ -21,6 +21,9 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
     "seed:admin": "ts-node -r tsconfig-paths/register src/database/seed-admin.ts",
+    "seed:demo": "ts-node --transpile-only -r tsconfig-paths/register src/database/seed-demo-users.ts",
+    "backup:patient-episodes": "ts-node --transpile-only -r tsconfig-paths/register src/database/backup-patient-episodes.ts",
+    "migrate:patient-episodes": "ts-node --transpile-only -r tsconfig-paths/register src/database/migrate-patient-episodes.ts",
     "seed:facilities": "ts-node --transpile-only -r tsconfig-paths/register src/facilities/seed/seed-facilities.ts",
     "seed:symptoms": "ts-node --transpile-only -r tsconfig-paths/register src/checkins/seed/seed-symptoms.ts"
   },

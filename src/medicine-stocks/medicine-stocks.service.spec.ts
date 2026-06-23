@@ -1,19 +1,22 @@
 import { ConfigService } from '@nestjs/config';
 import { ClientSession, ObjectId } from 'mongodb';
-import { DB, Database } from 'mongoloquent';
+import { DB } from 'mongoloquent';
 import { AppException } from '../common/exceptions/app.exception';
 import { MedicineStocksService } from './medicine-stocks.service';
 import { MedicineStockLog } from './models/medicine-stock-log.model';
 import { IMedicineStock, MedicineStock } from './models/medicine-stock.model';
+import { PatientsIndexService } from '../patients/patients-index.service';
 
 describe('MedicineStocksService', () => {
   const session = {} as ClientSession;
   const stockId = new ObjectId();
   const patientId = 'patient-1';
+  const patientProfileId = new ObjectId().toHexString();
   const operationKey = '0c9b2ff0-871d-4ce4-8f5a-8ced6e9507a0';
   const baseStock: IMedicineStock = {
     _id: stockId,
     patient_id: patientId,
+    patient_profile_id: patientProfileId,
     medicine_name: 'Rifampicin',
     medicine_type: 'OAT',
     quantity: 10,
@@ -45,22 +48,35 @@ describe('MedicineStocksService', () => {
   stockQuery.where.mockReturnValue(stockQuery);
   const mockStockModel = {
     where: jest.fn(() => stockQuery),
+    query: jest.fn(() => ({
+      getMongoDBCollection: jest.fn(() => stocks),
+    })),
   } as unknown as typeof MedicineStock;
-  const service = new MedicineStocksService(mockStockModel, MedicineStockLog, {
-    getOrThrow: jest.fn((key: string) =>
-      key === 'MONGODB_CONNECTION' ? 'mongodb://test' : 'test',
-    ),
-  } as unknown as ConfigService);
+  const mockStockLogModel = {
+    query: jest.fn(() => ({
+      getMongoDBCollection: jest.fn(() => logs),
+    })),
+  } as unknown as typeof MedicineStockLog;
+  const patientsIndex = {
+    getPatientProfile: jest.fn().mockResolvedValue({
+      _id: new ObjectId(patientProfileId),
+    }),
+  } as unknown as PatientsIndexService;
+  const service = new MedicineStocksService(
+    mockStockModel,
+    mockStockLogModel,
+    patientsIndex,
+    {
+      getOrThrow: jest.fn((key: string) =>
+        key === 'MONGODB_CONNECTION' ? 'mongodb://test' : 'test',
+      ),
+    } as unknown as ConfigService,
+  );
 
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.spyOn(Database, 'getDb').mockReturnValue({
-      collection: jest.fn((name: string) =>
-        name === 'medicine_stocks' ? stocks : logs,
-      ),
-    } as never);
     jest
-      .spyOn(DB, 'transaction')
+      .spyOn(DB.prototype, 'transaction')
       .mockImplementation(async (callback) => callback(session));
   });
 
@@ -81,6 +97,7 @@ describe('MedicineStocksService', () => {
     expect(stocks.insertOne).toHaveBeenCalledWith(
       expect.objectContaining({
         patient_id: patientId,
+        patient_profile_id: patientProfileId,
         quantity: 30,
         daily_dose: 2,
       }),
@@ -218,7 +235,7 @@ describe('MedicineStocksService', () => {
     });
 
     await expect(
-      service.consumeDailyDose(patientId, 'checkin-1'),
+      service.consumeDailyDose(patientId, patientProfileId, 'checkin-1'),
     ).rejects.toEqual(
       expect.objectContaining<Partial<AppException>>({
         statusCode: 409,
@@ -266,7 +283,11 @@ describe('MedicineStocksService', () => {
     stocks.updateOne.mockResolvedValue({ modifiedCount: 1 });
     logs.insertOne.mockResolvedValue({ insertedId: new ObjectId() });
 
-    const alerts = await service.consumeDailyDose(patientId, 'checkin-1');
+    const alerts = await service.consumeDailyDose(
+      patientId,
+      patientProfileId,
+      'checkin-1',
+    );
 
     expect(alerts).toEqual([stockId.toHexString()]);
     expect(stocks.updateOne).toHaveBeenCalledTimes(2);
@@ -284,7 +305,7 @@ describe('MedicineStocksService', () => {
     logs.findOne.mockResolvedValue({ _id: new ObjectId() });
 
     await expect(
-      service.consumeDailyDose(patientId, 'checkin-1'),
+      service.consumeDailyDose(patientId, patientProfileId, 'checkin-1'),
     ).resolves.toEqual([]);
     expect(stocks.find).not.toHaveBeenCalled();
     expect(stocks.updateOne).not.toHaveBeenCalled();

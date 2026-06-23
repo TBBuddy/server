@@ -1,12 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { Database } from 'mongoloquent';
+import { InjectModel } from '@mongoloquent/nestjs';
 import { ObjectId } from 'mongodb';
 import { startOfDay, subDays, format } from 'date-fns';
 import { AppException } from '../common/exceptions/app.exception';
-import type { IDailyCheckin } from '../checkins/models/daily-checkin.model';
-import type { ICheckinSymptom } from '../checkins/models/checkin-symptom.model';
-import type { ISymptom } from '../checkins/models/symptom.model';
+import { DailyCheckin } from '../checkins/models/daily-checkin.model';
+import {
+  CheckinSymptom,
+  type ICheckinSymptom,
+} from '../checkins/models/checkin-symptom.model';
+import { Symptom } from '../checkins/models/symptom.model';
 
 export interface DayData {
   date: string;
@@ -25,20 +27,30 @@ export interface PeriodData {
 
 @Injectable()
 export class PeriodCollectorService {
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    @InjectModel(DailyCheckin)
+    private readonly checkinModel: typeof DailyCheckin,
+    @InjectModel(CheckinSymptom)
+    private readonly checkinSymptomModel: typeof CheckinSymptom,
+    @InjectModel(Symptom)
+    private readonly symptomModel: typeof Symptom,
+  ) {}
 
-  async collect(patientId: string): Promise<PeriodData> {
+  async collect(
+    patientId: string,
+    patientProfileId: string,
+  ): Promise<PeriodData> {
     const today = startOfDay(new Date());
     const periodEnd = subDays(today, 1);
     const periodStart = subDays(today, 14);
 
-    const checkins = await this.nativeCheckins()
-      .find({
-        patient_id: patientId,
-        checkin_date: { $gte: periodStart, $lte: periodEnd },
-      })
-      .sort({ checkin_date: 1 })
-      .toArray();
+    const checkins = await this.checkinModel
+      .where('patient_id', patientId)
+      .where('patient_profile_id', patientProfileId)
+      .where('checkin_date', '>=', periodStart)
+      .where('checkin_date', '<=', periodEnd)
+      .orderBy('checkin_date', 'asc')
+      .get();
 
     if (checkins.length < 7) {
       throw new AppException(
@@ -50,15 +62,19 @@ export class PeriodCollectorService {
 
     const checkinIds = checkins.map((c) => String(c._id));
 
-    const checkinSymptoms = await this.nativeCheckinSymptoms()
-      .find({ checkin_id: { $in: checkinIds } })
-      .toArray();
+    const checkinSymptoms = await this.checkinSymptomModel
+      .whereIn('checkin_id', checkinIds)
+      .where('patient_profile_id', patientProfileId)
+      .get();
 
     const symptomIds = [...new Set(checkinSymptoms.map((cs) => cs.symptom_id))];
 
-    const symptoms = await this.nativeSymptoms()
-      .find({ _id: { $in: symptomIds.map((id) => new ObjectId(id)) } })
-      .toArray();
+    const symptoms = await this.symptomModel
+      .whereIn(
+        '_id',
+        symptomIds.map((id) => new ObjectId(id)),
+      )
+      .get();
 
     const symptomNameMap = new Map(
       symptoms.map((s) => [String(s._id), s.name]),
@@ -92,26 +108,5 @@ export class PeriodCollectorService {
       period_end_date: new Date(checkins[checkins.length - 1].checkin_date),
       analyzed_days: checkins.length,
     };
-  }
-
-  private nativeCheckins() {
-    return Database.getDb(
-      this.configService.getOrThrow<string>('MONGODB_CONNECTION'),
-      this.configService.getOrThrow<string>('MONGODB_DATABASE'),
-    ).collection<IDailyCheckin>('daily_checkins');
-  }
-
-  private nativeCheckinSymptoms() {
-    return Database.getDb(
-      this.configService.getOrThrow<string>('MONGODB_CONNECTION'),
-      this.configService.getOrThrow<string>('MONGODB_DATABASE'),
-    ).collection<ICheckinSymptom>('checkin_symptoms');
-  }
-
-  private nativeSymptoms() {
-    return Database.getDb(
-      this.configService.getOrThrow<string>('MONGODB_CONNECTION'),
-      this.configService.getOrThrow<string>('MONGODB_DATABASE'),
-    ).collection<ISymptom>('symptoms');
   }
 }

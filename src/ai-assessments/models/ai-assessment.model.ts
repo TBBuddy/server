@@ -3,6 +3,7 @@ import { AiRiskLevel } from '../../common/enums/ai-risk-level.enum';
 
 export interface IAiAssessment extends IMongoloquentSchema {
   patient_id: string;
+  patient_profile_id: string;
   period_start_date: Date;
   period_end_date: Date;
   analyzed_days: number;

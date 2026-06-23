@@ -3,4 +3,5 @@ export enum TreatmentStatus {
   ON_TREATMENT = 'ON_TREATMENT',
   RECOVERED = 'RECOVERED',
   DROPPED = 'DROPPED',
+  CANCELLED = 'CANCELLED',
 }

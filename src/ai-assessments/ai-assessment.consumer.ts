@@ -2,8 +2,8 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job, UnrecoverableError } from 'bullmq';
 import { AppException } from '../common/exceptions/app.exception';
-import { ConfigService } from '@nestjs/config';
-import { Database } from 'mongoloquent';
+import { ObjectId } from 'mongodb';
+import { InjectModel } from '@mongoloquent/nestjs';
 import {
   AI_ASSESSMENT_QUEUE,
   AiAssessmentJobData,
@@ -12,38 +12,47 @@ import { PeriodCollectorService } from './period-collector.service';
 import { PiiRedactorService } from './pii-redactor.service';
 import { GeminiAdapterService } from './gemini-adapter.service';
 import { AiRiskLevel } from '../common/enums/ai-risk-level.enum';
-import type { IAiAssessment } from './models/ai-assessment.model';
-import type { IAiAssessmentCheckinSymptom } from './models/ai-assessment-checkin-symptom.model';
+import { AiAssessment } from './models/ai-assessment.model';
+import { AiAssessmentCheckinSymptom } from './models/ai-assessment-checkin-symptom.model';
 
 @Processor(AI_ASSESSMENT_QUEUE)
 export class AiAssessmentConsumer extends WorkerHost {
   private readonly logger = new Logger(AiAssessmentConsumer.name);
 
   constructor(
-    private readonly configService: ConfigService,
     private readonly periodCollector: PeriodCollectorService,
     private readonly piiRedactor: PiiRedactorService,
     private readonly geminiAdapter: GeminiAdapterService,
+    @InjectModel(AiAssessment)
+    private readonly assessmentModel: typeof AiAssessment,
+    @InjectModel(AiAssessmentCheckinSymptom)
+    private readonly junctionModel: typeof AiAssessmentCheckinSymptom,
   ) {
     super();
   }
 
   async process(job: Job<AiAssessmentJobData>, token?: string): Promise<void> {
     void token;
-    const { patientId } = job.data;
+    const { patientId, patientProfileId } = job.data;
     this.logger.log({
       msg: 'ai_assessment_job_start',
       patientId,
+      patientProfileId,
       jobId: job.id,
     });
 
     try {
-      const periodData = await this.periodCollector.collect(patientId);
+      const periodData = await this.periodCollector.collect(
+        patientId,
+        patientProfileId,
+      );
       const redacted = this.piiRedactor.redact(periodData.days);
       const geminiResult = await this.geminiAdapter.assess(redacted);
 
       const assessmentDoc = {
+        _id: new ObjectId(),
         patient_id: patientId,
+        patient_profile_id: patientProfileId,
         period_start_date: periodData.period_start_date,
         period_end_date: periodData.period_end_date,
         analyzed_days: periodData.analyzed_days,
@@ -57,22 +66,20 @@ export class AiAssessmentConsumer extends WorkerHost {
         created_at: new Date(),
       };
 
-      const assessmentResult = await this.nativeAssessments().insertOne(
-        assessmentDoc as any,
-      );
-      const assessmentId = assessmentResult.insertedId.toString();
+      const assessment = await this.assessmentModel.create(assessmentDoc);
+      const assessmentId = assessment._id.toHexString();
 
       const allCheckinSymptomIds = periodData.days.flatMap(
         (d) => d.checkin_symptom_ids,
       );
       if (allCheckinSymptomIds.length > 0) {
-        await this.nativeJunctions().insertMany(
-          allCheckinSymptomIds.map((csId) => ({
-            ai_assessment_id: assessmentId,
-            checkin_symptom_id: csId,
-            created_at: new Date(),
-          })) as any[],
-        );
+        const junctions = allCheckinSymptomIds.map((csId) => ({
+          _id: new ObjectId(),
+          ai_assessment_id: assessmentId,
+          checkin_symptom_id: csId,
+          created_at: new Date(),
+        }));
+        await this.junctionModel.createMany(junctions);
       }
 
       if (
@@ -83,6 +90,7 @@ export class AiAssessmentConsumer extends WorkerHost {
         this.logger.warn({
           msg: 'ai_assessment_high_risk',
           patientId,
+          patientProfileId,
           assessmentId,
         });
       }
@@ -90,12 +98,14 @@ export class AiAssessmentConsumer extends WorkerHost {
       this.logger.log({
         msg: 'ai_assessment_job_done',
         patientId,
+        patientProfileId,
         assessmentId,
       });
     } catch (error) {
       this.logger.error({
         msg: 'ai_assessment_job_failed',
         patientId,
+        patientProfileId,
         jobId: job.id,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -104,19 +114,5 @@ export class AiAssessmentConsumer extends WorkerHost {
       }
       throw error;
     }
-  }
-
-  private nativeAssessments() {
-    return Database.getDb(
-      this.configService.getOrThrow<string>('MONGODB_CONNECTION'),
-      this.configService.getOrThrow<string>('MONGODB_DATABASE'),
-    ).collection<IAiAssessment>('ai_assessments');
-  }
-
-  private nativeJunctions() {
-    return Database.getDb(
-      this.configService.getOrThrow<string>('MONGODB_CONNECTION'),
-      this.configService.getOrThrow<string>('MONGODB_DATABASE'),
-    ).collection<IAiAssessmentCheckinSymptom>('ai_assessment_checkin_symptoms');
   }
 }

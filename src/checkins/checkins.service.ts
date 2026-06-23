@@ -1,39 +1,60 @@
 import { Injectable } from '@nestjs/common';
-import { InjectModel } from '@mongoloquent/nestjs';
 import { ConfigService } from '@nestjs/config';
-import { Database } from 'mongoloquent';
-import { ObjectId } from 'mongodb';
+import { InjectModel } from '@mongoloquent/nestjs';
 import { differenceInDays, startOfDay } from 'date-fns';
+import {
+  ClientSession,
+  Collection,
+  Filter,
+  MongoServerError,
+  ObjectId,
+  Sort,
+  WithId,
+} from 'mongodb';
 import { AppException } from '../common/exceptions/app.exception';
 import { SeverityLevel } from '../common/enums/severity-level.enum';
-import { Symptom, ISymptom } from './models/symptom.model';
-import { DailyCheckin, IDailyCheckin } from './models/daily-checkin.model';
+import { MedicineStocksIndexService } from '../medicine-stocks/medicine-stocks-index.service';
+import { PatientsIndexService } from '../patients/patients-index.service';
+import { IPatientProfile } from '../patients/models/patient-profile.model';
+import { DailyCheckinResponseDto } from './dto/checkin-response.dto';
+import {
+  CreateCheckinDto,
+  CreateCheckinSymptomDto,
+} from './dto/create-checkin.dto';
+import { GetCheckinsDto } from './dto/get-checkins.dto';
+import { SymptomResponseDto } from './dto/symptom-response.dto';
+import { UpdateCheckinDto } from './dto/update-checkin.dto';
 import {
   CheckinSymptom,
   ICheckinSymptom,
 } from './models/checkin-symptom.model';
-import {
-  PatientProfile,
-  IPatientProfile,
-} from '../patients/models/patient-profile.model';
-import { CreateCheckinDto } from './dto/create-checkin.dto';
-import { UpdateCheckinDto } from './dto/update-checkin.dto';
-import { GetCheckinsDto } from './dto/get-checkins.dto';
-import { CheckinResponseDto } from './dto/checkin-response.dto';
-import { SymptomResponseDto } from './dto/symptom-response.dto';
+import { DailyCheckin, IDailyCheckin } from './models/daily-checkin.model';
+import { ISymptom, Symptom } from './models/symptom.model';
 import { symptomsSeed } from './seed/symptoms.seed';
+import { runTransaction } from '../database/run-transaction';
+
+interface PaginatedCheckins {
+  data: DailyCheckinResponseDto[];
+  meta: {
+    page: number;
+    limit: number;
+    totalItems: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
+}
 
 @Injectable()
 export class CheckinsService {
   constructor(
-    @InjectModel(Symptom)
-    private readonly symptomModel: typeof Symptom,
+    @InjectModel(Symptom) private readonly symptomModel: typeof Symptom,
     @InjectModel(DailyCheckin)
     private readonly checkinModel: typeof DailyCheckin,
     @InjectModel(CheckinSymptom)
     private readonly checkinSymptomModel: typeof CheckinSymptom,
-    @InjectModel(PatientProfile)
-    private readonly profileModel: typeof PatientProfile,
+    private readonly patientsIndex: PatientsIndexService,
+    private readonly medicineStocksIndex: MedicineStocksIndexService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -42,259 +63,523 @@ export class CheckinsService {
       .orderBy('category', 'asc')
       .orderBy('name', 'asc')
       .get();
-
-    return symptoms.map((s) => ({
-      _id: s._id.toString(),
-      name: s.name,
-      description: s.description ?? null,
-      category: s.category ?? null,
-      is_common_tb_symptom: s.is_common_tb_symptom,
-      is_possible_side_effect: s.is_possible_side_effect,
+    return symptoms.map((symptom) => ({
+      id: symptom._id.toString(),
+      name: symptom.name,
+      description: symptom.description ?? null,
+      category: symptom.category ?? null,
+      isCommonTbSymptom: symptom.is_common_tb_symptom,
+      isPossibleSideEffect: symptom.is_possible_side_effect,
     }));
   }
 
-  async getTodayCheckin(userId: string): Promise<CheckinResponseDto | null> {
-    await this.requireProfile(userId);
-
-    const today = startOfDay(new Date());
-    const checkin = await this.checkinModel
-      .where('patient_id', userId)
-      .where('checkin_date', today)
-      .first();
-
-    if (!checkin) return null;
-
-    return this.buildCheckinResponse(checkin);
+  async getTodayCheckin(
+    userId: string,
+  ): Promise<DailyCheckinResponseDto | null> {
+    const profile = await this.patientsIndex.getPatientProfile(userId);
+    const checkin = await this.checkins().findOne({
+      patient_id: userId,
+      patient_profile_id: profile._id.toHexString(),
+      checkin_date: startOfDay(new Date()),
+    });
+    return checkin ? this.buildCheckinResponse(checkin) : null;
   }
 
   async createCheckin(
     userId: string,
     dto: CreateCheckinDto,
-  ): Promise<CheckinResponseDto> {
-    const profile = await this.requireProfile(userId);
+    idempotencyKey: string,
+  ): Promise<void> {
+    this.validateIdempotencyKey(idempotencyKey);
+    const profile = await this.patientsIndex.getPatientProfile(userId);
+    const normalized = await this.normalizeInput(dto);
     const today = startOfDay(new Date());
+    const checkinId = new ObjectId();
+    const patientProfileId = profile._id.toHexString();
 
-    const existing = await this.checkinModel
-      .where('patient_id', userId)
-      .where('checkin_date', today)
-      .first();
-
-    if (existing) {
-      throw new AppException(
-        409,
-        'CHECKIN_ALREADY_EXISTS',
-        'Check-in hari ini sudah dilakukan. Gunakan PATCH untuk koreksi.',
-      );
-    }
-
-    const hasComplaint = dto.has_complaint ?? (dto.symptoms?.length ?? 0) > 0;
-    const rawSymptoms = hasComplaint ? (dto.symptoms ?? []) : [];
-
-    if (hasComplaint && rawSymptoms.length === 0) {
-      throw new AppException(
-        422,
-        'BUSINESS_RULE_VIOLATION',
-        'Wajib melaporkan minimal satu gejala jika ada keluhan.',
-      );
-    }
-
-    const validatedSymptoms = await this.validateSymptoms(rawSymptoms);
-    const overallSeverity = hasComplaint
-      ? this.calcOverallSeverity(validatedSymptoms.map((s) => s.severity))
-      : null;
-
-    const treatmentDayNumber = Math.max(
-      1,
-      differenceInDays(today, startOfDay(profile.treatment_start_date!)) + 1,
-    );
-
-    const checkin = await this.checkinModel.create({
+    const existing = await this.checkins().findOne({
       patient_id: userId,
+      patient_profile_id: patientProfileId,
       checkin_date: today,
-      treatment_day_number: treatmentDayNumber,
-      has_taken_medicine: dto.has_taken_medicine,
-      taken_at: dto.taken_at ? new Date(dto.taken_at) : null,
-      has_complaint: hasComplaint,
-      severity: overallSeverity,
-      general_note: dto.general_note ?? null,
-      skipped_reason: dto.skipped_reason ?? null,
     });
-
-    if (validatedSymptoms.length > 0) {
-      await this.nativeCheckinSymptoms().insertMany(
-        validatedSymptoms.map((s) => ({
-          checkin_id: checkin._id.toString(),
-          patient_id: userId,
-          symptom_id: s.symptom_id,
-          severity: s.severity,
-          note: s.note ?? null,
-          created_at: new Date(),
-        })) as any[],
-      );
+    if (existing) {
+      await this.assertSameCreate(existing, normalized);
+      return;
     }
 
-    return this.buildCheckinResponse(checkin);
+    try {
+      const stockAlerts = await this.transaction(async (session) => {
+        const now = new Date();
+        await this.checkins().insertOne(
+          {
+            _id: checkinId,
+            patient_id: userId,
+            patient_profile_id: patientProfileId,
+            checkin_date: today,
+            treatment_day_number: this.treatmentDay(profile, today),
+            has_taken_medicine: normalized.hasTakenMedicine,
+            taken_at: normalized.takenAt,
+            has_complaint: normalized.hasComplaint,
+            severity: normalized.severity,
+            general_note: normalized.generalNote,
+            skipped_reason: normalized.skippedReason,
+            created_at: now,
+            updated_at: now,
+          },
+          { session },
+        );
+        await this.replaceSymptoms(
+          checkinId.toHexString(),
+          userId,
+          patientProfileId,
+          normalized.symptoms,
+          session,
+        );
+
+        const alerts = normalized.hasTakenMedicine
+          ? await this.medicineStocksIndex.consumeDailyDose(
+              userId,
+              patientProfileId,
+              checkinId.toHexString(),
+              session,
+            )
+          : [];
+        await this.patientsIndex.incrementPatientStats(
+          userId,
+          {
+            totalCheckins: 1,
+            totalMissedDays: normalized.hasTakenMedicine ? 0 : 1,
+            treatmentDayCount: this.treatmentDay(profile, today),
+          },
+          session,
+        );
+        return alerts;
+      });
+
+      await Promise.all(
+        stockAlerts.map((stockId) =>
+          this.medicineStocksIndex.fireStockAlert(userId, stockId),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof MongoServerError && error.code === 11000) {
+        const concurrent = await this.checkins().findOne({
+          patient_id: userId,
+          patient_profile_id: patientProfileId,
+          checkin_date: today,
+        });
+        if (concurrent) {
+          await this.assertSameCreate(concurrent, normalized);
+          return;
+        }
+      }
+      throw error;
+    }
   }
 
   async updateCheckin(
     userId: string,
     checkinId: string,
     dto: UpdateCheckinDto,
-  ): Promise<CheckinResponseDto> {
-    if (!ObjectId.isValid(checkinId)) {
+  ): Promise<void> {
+    const profile = await this.patientsIndex.getPatientProfile(userId);
+    const patientProfileId = profile._id.toHexString();
+    const objectId = new ObjectId(checkinId);
+    const existing = await this.requireOwnedCheckin(
+      userId,
+      patientProfileId,
+      objectId,
+    );
+    if (
+      startOfDay(existing.checkin_date).getTime() !==
+      startOfDay(new Date()).getTime()
+    ) {
       throw new AppException(
-        404,
-        'RESOURCE_NOT_FOUND',
-        'Check-in tidak ditemukan.',
-      );
-    }
-
-    const checkin = await this.checkinModel
-      .where('_id', new ObjectId(checkinId))
-      .where('patient_id', userId)
-      .first();
-
-    if (!checkin) {
-      throw new AppException(
-        404,
-        'RESOURCE_NOT_FOUND',
-        'Check-in tidak ditemukan.',
-      );
-    }
-
-    const today = startOfDay(new Date());
-    const checkinDate = startOfDay(new Date(checkin.checkin_date));
-    if (checkinDate.getTime() !== today.getTime()) {
-      throw new AppException(
-        422,
+        400,
         'BUSINESS_RULE_VIOLATION',
         'Koreksi hanya dapat dilakukan pada hari yang sama.',
       );
     }
-
-    const hasComplaint = dto.has_complaint ?? checkin.has_complaint;
-    const rawSymptoms = dto.symptoms ?? [];
-
-    if (
-      hasComplaint &&
-      dto.symptoms !== undefined &&
-      rawSymptoms.length === 0
-    ) {
+    if (existing.has_taken_medicine && dto.hasTakenMedicine === false) {
       throw new AppException(
-        422,
+        400,
         'BUSINESS_RULE_VIOLATION',
-        'Wajib melaporkan minimal satu gejala jika ada keluhan.',
+        'Status obat yang sudah dikonsumsi tidak dapat dibatalkan.',
       );
     }
 
-    const validatedSymptoms =
-      dto.symptoms !== undefined && hasComplaint
-        ? await this.validateSymptoms(
-            rawSymptoms as Array<{
-              symptom_id: string;
-              severity: SeverityLevel;
-              note?: string;
-            }>,
-          )
-        : [];
+    const currentSymptoms = await this.getStoredSymptoms(checkinId);
+    const resultingTaken = dto.hasTakenMedicine ?? existing.has_taken_medicine;
+    const normalized = await this.normalizeInput({
+      hasTakenMedicine: resultingTaken,
+      hasComplaint: dto.hasComplaint ?? existing.has_complaint,
+      takenAt:
+        dto.takenAt ??
+        (existing.taken_at ? existing.taken_at.toISOString() : undefined),
+      skippedReason: resultingTaken
+        ? dto.skippedReason
+        : (dto.skippedReason ?? existing.skipped_reason ?? undefined),
+      generalNote: dto.generalNote ?? existing.general_note ?? undefined,
+      symptoms:
+        dto.symptoms ??
+        currentSymptoms.map((item) => ({
+          symptomId: item.symptom_id,
+          severity: item.severity,
+          note: item.note ?? undefined,
+        })),
+    });
 
-    const overallSeverity = hasComplaint
-      ? this.calcOverallSeverity(validatedSymptoms.map((s) => s.severity))
-      : null;
-
-    await this.nativeCheckins().updateOne(
-      { _id: new ObjectId(checkinId) },
-      {
-        $set: {
-          ...(dto.has_taken_medicine !== undefined && {
-            has_taken_medicine: dto.has_taken_medicine,
-          }),
-          ...(dto.taken_at !== undefined && {
-            taken_at: dto.taken_at ? new Date(dto.taken_at) : null,
-          }),
-          has_complaint: hasComplaint,
-          severity: overallSeverity,
-          ...(dto.skipped_reason !== undefined && {
-            skipped_reason: dto.skipped_reason,
-          }),
-          ...(dto.general_note !== undefined && {
-            general_note: dto.general_note,
-          }),
-          updated_at: new Date(),
+    const stockAlerts = await this.transaction(async (session) => {
+      await this.checkins().updateOne(
+        {
+          _id: objectId,
+          patient_id: userId,
+          patient_profile_id: patientProfileId,
         },
-      },
-    );
-
-    if (dto.symptoms !== undefined) {
-      await this.nativeCheckinSymptoms().deleteMany({ checkin_id: checkinId });
-
-      if (validatedSymptoms.length > 0) {
-        await this.nativeCheckinSymptoms().insertMany(
-          validatedSymptoms.map((s) => ({
-            checkin_id: checkinId,
-            patient_id: userId,
-            symptom_id: s.symptom_id,
-            severity: s.severity,
-            note: s.note ?? null,
-            created_at: new Date(),
-          })) as any[],
+        {
+          $set: {
+            has_taken_medicine: normalized.hasTakenMedicine,
+            taken_at: normalized.takenAt,
+            has_complaint: normalized.hasComplaint,
+            severity: normalized.severity,
+            general_note: normalized.generalNote,
+            skipped_reason: normalized.skippedReason,
+            updated_at: new Date(),
+          },
+        },
+        { session },
+      );
+      await this.replaceSymptoms(
+        checkinId,
+        userId,
+        patientProfileId,
+        normalized.symptoms,
+        session,
+      );
+      if (!existing.has_taken_medicine && normalized.hasTakenMedicine) {
+        const alerts = await this.medicineStocksIndex.consumeDailyDose(
+          userId,
+          patientProfileId,
+          checkinId,
+          session,
         );
+        await this.patientsIndex.incrementPatientStats(
+          userId,
+          { totalMissedDays: -1 },
+          session,
+        );
+        return alerts;
       }
-    }
+      return [];
+    });
 
-    const updated = await this.checkinModel
-      .where('_id', new ObjectId(checkinId))
-      .first();
-
-    return this.buildCheckinResponse(updated!);
+    await Promise.all(
+      stockAlerts.map((stockId) =>
+        this.medicineStocksIndex.fireStockAlert(userId, stockId),
+      ),
+    );
   }
 
   async getCheckins(
     userId: string,
     dto: GetCheckinsDto,
-  ): Promise<CheckinResponseDto[]> {
-    let checkins: IDailyCheckin[];
-
-    if (dto.year && dto.month) {
-      const start = new Date(dto.year, dto.month - 1, 1);
-      const end = new Date(dto.year, dto.month, 0, 23, 59, 59, 999);
-
-      const raw = await this.nativeCheckins()
-        .find({
-          patient_id: userId,
-          checkin_date: { $gte: start, $lte: end },
-        })
-        .sort({ checkin_date: -1 })
-        .toArray();
-
-      checkins = raw as unknown as IDailyCheckin[];
-    } else {
-      checkins = await this.checkinModel
-        .where('patient_id', userId)
-        .orderBy('checkin_date', 'desc')
-        .get();
+  ): Promise<PaginatedCheckins> {
+    const profile = await this.patientsIndex.getPatientProfile(userId);
+    const page = dto.page ?? 1;
+    const limit = dto.limit ?? 20;
+    const filter: Filter<IDailyCheckin> = {
+      patient_id: userId,
+      patient_profile_id: profile._id.toHexString(),
+    };
+    if ((dto.year === undefined) !== (dto.month === undefined)) {
+      throw new AppException(
+        400,
+        'INVALID_QUERY',
+        'Parameter year dan month harus dikirim bersama.',
+      );
     }
-
-    return Promise.all(checkins.map((c) => this.buildCheckinResponse(c)));
+    if (dto.year && dto.month) {
+      filter.checkin_date = {
+        $gte: new Date(dto.year, dto.month - 1, 1),
+        $lt: new Date(dto.year, dto.month, 1),
+      };
+    }
+    const sort: Sort = { checkin_date: dto.sortOrder === 'asc' ? 1 : -1 };
+    const [items, totalItems] = await Promise.all([
+      this.checkins()
+        .find(filter)
+        .sort(sort)
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .toArray(),
+      this.checkins().countDocuments(filter),
+    ]);
+    const totalPages = Math.ceil(totalItems / limit);
+    return {
+      data: await Promise.all(
+        items.map((item) => this.buildCheckinResponse(item)),
+      ),
+      meta: {
+        page,
+        limit,
+        totalItems,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      },
+    };
   }
 
   async getCheckinById(
     userId: string,
     checkinId: string,
-  ): Promise<CheckinResponseDto> {
-    if (!ObjectId.isValid(checkinId)) {
+  ): Promise<DailyCheckinResponseDto> {
+    const profile = await this.patientsIndex.getPatientProfile(userId);
+    return this.buildCheckinResponse(
+      await this.requireOwnedCheckin(
+        userId,
+        profile._id.toHexString(),
+        new ObjectId(checkinId),
+      ),
+    );
+  }
+
+  async seedSymptoms(): Promise<{
+    insertedCount: number;
+    existingCount: number;
+  }> {
+    const now = new Date();
+    const result = await this.symptoms().bulkWrite(
+      symptomsSeed.map((symptom) => ({
+        updateOne: {
+          filter: { name: symptom.name },
+          update: {
+            $setOnInsert: {
+              _id: new ObjectId(),
+              ...symptom,
+              created_at: now,
+              updated_at: now,
+            },
+          },
+          upsert: true,
+        },
+      })),
+      { ordered: false },
+    );
+    return {
+      insertedCount: result.upsertedCount,
+      existingCount: symptomsSeed.length - result.upsertedCount,
+    };
+  }
+
+  private async normalizeInput(dto: CreateCheckinDto) {
+    const hasComplaint = dto.hasComplaint ?? (dto.symptoms?.length ?? 0) > 0;
+    const symptoms = hasComplaint ? (dto.symptoms ?? []) : [];
+    if (hasComplaint && symptoms.length === 0) {
       throw new AppException(
-        404,
-        'RESOURCE_NOT_FOUND',
-        'Check-in tidak ditemukan.',
+        400,
+        'BUSINESS_RULE_VIOLATION',
+        'Minimal satu gejala wajib dipilih saat ada keluhan.',
       );
     }
+    if (!dto.hasTakenMedicine && !dto.skippedReason) {
+      throw new AppException(
+        400,
+        'BUSINESS_RULE_VIOLATION',
+        'Alasan melewatkan obat wajib diisi.',
+      );
+    }
+    if (dto.hasTakenMedicine && dto.skippedReason) {
+      throw new AppException(
+        400,
+        'BUSINESS_RULE_VIOLATION',
+        'Alasan melewatkan obat tidak boleh diisi saat obat diminum.',
+      );
+    }
+    if (!dto.hasTakenMedicine && dto.takenAt) {
+      throw new AppException(
+        400,
+        'BUSINESS_RULE_VIOLATION',
+        'Waktu minum obat tidak boleh diisi saat obat tidak diminum.',
+      );
+    }
+    await this.validateSymptoms(symptoms);
+    return {
+      hasTakenMedicine: dto.hasTakenMedicine,
+      takenAt: dto.takenAt ? new Date(dto.takenAt) : null,
+      hasComplaint,
+      severity: hasComplaint ? this.maxSeverity(symptoms) : SeverityLevel.NONE,
+      generalNote: dto.generalNote ?? null,
+      skippedReason: dto.hasTakenMedicine ? null : (dto.skippedReason ?? null),
+      symptoms,
+    };
+  }
 
-    const checkin = await this.checkinModel
-      .where('_id', new ObjectId(checkinId))
-      .where('patient_id', userId)
-      .first();
+  private async validateSymptoms(
+    symptoms: CreateCheckinSymptomDto[],
+  ): Promise<void> {
+    const uniqueIds = new Set(symptoms.map((item) => item.symptomId));
+    if (uniqueIds.size !== symptoms.length) {
+      throw new AppException(
+        400,
+        'INVALID_SYMPTOM',
+        'Gejala yang sama tidak boleh dikirim lebih dari sekali.',
+      );
+    }
+    const ids = symptoms.map((item) => new ObjectId(item.symptomId));
+    const found = await this.symptoms().countDocuments({ _id: { $in: ids } });
+    if (found !== symptoms.length) {
+      throw new AppException(
+        400,
+        'INVALID_SYMPTOM',
+        'Terdapat symptom yang tidak valid.',
+      );
+    }
+    if (symptoms.some((item) => item.severity === SeverityLevel.NONE)) {
+      throw new AppException(
+        400,
+        'INVALID_SYMPTOM',
+        'Severity symptom tidak boleh NONE.',
+      );
+    }
+  }
 
+  private async assertSameCreate(
+    existing: WithId<IDailyCheckin>,
+    normalized: Awaited<ReturnType<CheckinsService['normalizeInput']>>,
+  ): Promise<void> {
+    const stored = await this.getStoredSymptoms(existing._id.toHexString());
+    const same =
+      existing.has_taken_medicine === normalized.hasTakenMedicine &&
+      (existing.taken_at?.toISOString() ?? null) ===
+        (normalized.takenAt?.toISOString() ?? null) &&
+      existing.has_complaint === normalized.hasComplaint &&
+      existing.severity === normalized.severity &&
+      (existing.general_note ?? null) === normalized.generalNote &&
+      (existing.skipped_reason ?? null) === normalized.skippedReason &&
+      this.symptomSignature(stored) ===
+        this.symptomSignature(normalized.symptoms);
+    if (!same) {
+      throw new AppException(
+        409,
+        'IDEMPOTENCY_CONFLICT',
+        'Check-in hari ini sudah ada dengan payload berbeda.',
+      );
+    }
+  }
+
+  private symptomSignature(
+    symptoms: Array<{
+      symptom_id?: string;
+      symptomId?: string;
+      severity: SeverityLevel;
+      note?: string | null;
+    }>,
+  ): string {
+    return JSON.stringify(
+      symptoms
+        .map((item) => ({
+          id: item.symptomId ?? item.symptom_id,
+          severity: item.severity,
+          note: item.note ?? null,
+        }))
+        .sort((a, b) => (a.id ?? '').localeCompare(b.id ?? '')),
+    );
+  }
+
+  private maxSeverity(symptoms: CreateCheckinSymptomDto[]): SeverityLevel {
+    const rank = {
+      [SeverityLevel.NONE]: 0,
+      [SeverityLevel.MILD]: 1,
+      [SeverityLevel.MODERATE]: 2,
+      [SeverityLevel.SEVERE]: 3,
+    };
+    return symptoms.reduce(
+      (highest, item) =>
+        rank[item.severity] > rank[highest] ? item.severity : highest,
+      SeverityLevel.NONE,
+    );
+  }
+
+  private async replaceSymptoms(
+    checkinId: string,
+    patientId: string,
+    patientProfileId: string,
+    symptoms: CreateCheckinSymptomDto[],
+    session: ClientSession,
+  ): Promise<void> {
+    await this.checkinSymptoms().deleteMany(
+      { checkin_id: checkinId },
+      { session },
+    );
+    if (symptoms.length === 0) return;
+    await this.checkinSymptoms().insertMany(
+      symptoms.map((item) => ({
+        _id: new ObjectId(),
+        checkin_id: checkinId,
+        patient_id: patientId,
+        patient_profile_id: patientProfileId,
+        symptom_id: item.symptomId,
+        severity: item.severity,
+        note: item.note ?? null,
+        created_at: new Date(),
+      })),
+      { session },
+    );
+  }
+
+  private async buildCheckinResponse(
+    checkin: WithId<IDailyCheckin>,
+  ): Promise<DailyCheckinResponseDto> {
+    const records = await this.getStoredSymptoms(checkin._id.toHexString());
+    const symptomIds = records.map((item) => new ObjectId(item.symptom_id));
+    const master = symptomIds.length
+      ? await this.symptoms()
+          .find({ _id: { $in: symptomIds } })
+          .toArray()
+      : [];
+    const names = new Map(
+      master.map((item) => [item._id.toHexString(), item.name]),
+    );
+    return {
+      id: checkin._id.toHexString(),
+      checkinDate: checkin.checkin_date.toISOString().slice(0, 10),
+      treatmentDayNumber: checkin.treatment_day_number,
+      hasTakenMedicine: checkin.has_taken_medicine,
+      takenAt: checkin.taken_at?.toISOString() ?? null,
+      hasComplaint: checkin.has_complaint,
+      severity: checkin.severity,
+      generalNote: checkin.general_note ?? null,
+      skippedReason: checkin.skipped_reason ?? null,
+      symptoms: records.map((item) => ({
+        id: item._id.toHexString(),
+        symptomId: item.symptom_id,
+        name: names.get(item.symptom_id) ?? '',
+        severity: item.severity,
+        note: item.note ?? null,
+      })),
+      createdAt: checkin.created_at?.toISOString() ?? '',
+      updatedAt: checkin.updated_at?.toISOString() ?? '',
+    };
+  }
+
+  private getStoredSymptoms(checkinId: string) {
+    return this.checkinSymptoms()
+      .find({ checkin_id: checkinId })
+      .sort({ created_at: 1 })
+      .toArray();
+  }
+
+  private async requireOwnedCheckin(
+    userId: string,
+    patientProfileId: string,
+    checkinId: ObjectId,
+  ): Promise<WithId<IDailyCheckin>> {
+    const checkin = await this.checkins().findOne({
+      _id: checkinId,
+      patient_id: userId,
+      patient_profile_id: patientProfileId,
+    });
     if (!checkin) {
       throw new AppException(
         404,
@@ -302,149 +587,51 @@ export class CheckinsService {
         'Check-in tidak ditemukan.',
       );
     }
-
-    return this.buildCheckinResponse(checkin);
+    return checkin;
   }
 
-  async seedSymptoms(): Promise<string> {
-    const count = await this.symptomModel.count();
-    if (count > 0) {
-      return `skipped — ${count} symptoms sudah tersedia`;
-    }
-
-    await this.nativeSymptoms().insertMany(
-      symptomsSeed.map((s) => ({
-        ...s,
-        created_at: new Date(),
-        updated_at: new Date(),
-      })) as any[],
-    );
-
-    return `inserted ${symptomsSeed.length} symptoms`;
-  }
-
-  private async requireProfile(userId: string): Promise<IPatientProfile> {
-    const profile = await this.profileModel.where('user_id', userId).first();
-    if (!profile) {
-      throw new AppException(
-        403,
-        'PATIENT_PROFILE_NOT_FOUND',
-        'Profil pasien tidak ditemukan. Selesaikan onboarding terlebih dahulu.',
-      );
-    }
-    return profile;
-  }
-
-  private async validateSymptoms(
-    symptoms: Array<{
-      symptom_id: string;
-      severity: SeverityLevel;
-      note?: string;
-    }>,
-  ): Promise<
-    Array<{ symptom_id: string; severity: SeverityLevel; note?: string }>
-  > {
-    if (symptoms.length === 0) return [];
-
-    for (const s of symptoms) {
-      if (!ObjectId.isValid(s.symptom_id)) {
-        throw new AppException(
-          422,
-          'INVALID_SYMPTOM',
-          `Symptom ID tidak valid: ${s.symptom_id}`,
-        );
-      }
-    }
-
-    const ids = symptoms.map((s) => new ObjectId(s.symptom_id));
-    const found = await this.nativeSymptoms()
-      .find({ _id: { $in: ids } })
-      .toArray();
-
-    if (found.length !== symptoms.length) {
-      throw new AppException(
-        422,
-        'INVALID_SYMPTOM',
-        'Terdapat symptom ID yang tidak ditemukan dalam master data.',
-      );
-    }
-
-    return symptoms;
-  }
-
-  private calcOverallSeverity(severities: SeverityLevel[]): SeverityLevel {
-    const order = [
-      SeverityLevel.MILD,
-      SeverityLevel.MODERATE,
-      SeverityLevel.SEVERE,
-    ];
-    return severities.reduce(
-      (max, s) => (order.indexOf(s) > order.indexOf(max) ? s : max),
-      SeverityLevel.MILD,
+  private treatmentDay(profile: IPatientProfile, today: Date): number {
+    return Math.max(
+      1,
+      differenceInDays(today, startOfDay(profile.treatment_start_date!)) + 1,
     );
   }
 
-  private async buildCheckinResponse(
-    checkin: IDailyCheckin,
-  ): Promise<CheckinResponseDto> {
-    const checkinId = checkin._id.toString();
-
-    const checkinSymptoms = await this.checkinSymptomModel
-      .where('checkin_id', checkinId)
-      .get();
-
-    let symptomNames: Map<string, string> = new Map();
-    if (checkinSymptoms.length > 0) {
-      const ids = checkinSymptoms.map((cs) => new ObjectId(cs.symptom_id));
-      const masterSymptoms = await this.nativeSymptoms()
-        .find({ _id: { $in: ids } })
-        .toArray();
-      symptomNames = new Map(
-        masterSymptoms.map((s) => [s._id.toString(), s.name as string]),
+  private validateIdempotencyKey(value: string): void {
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value ?? '',
+      )
+    ) {
+      throw new AppException(
+        400,
+        'VALIDATION_ERROR',
+        'Header Idempotency-Key wajib berupa UUID v4.',
       );
     }
-
-    return {
-      _id: checkinId,
-      patient_id: checkin.patient_id,
-      checkin_date: checkin.checkin_date,
-      treatment_day_number: checkin.treatment_day_number,
-      has_taken_medicine: checkin.has_taken_medicine,
-      taken_at: checkin.taken_at ?? null,
-      has_complaint: checkin.has_complaint,
-      severity: checkin.severity,
-      general_note: checkin.general_note ?? null,
-      skipped_reason: checkin.skipped_reason ?? null,
-      symptoms: checkinSymptoms.map((cs) => ({
-        _id: cs._id.toString(),
-        symptom_id: cs.symptom_id,
-        name: symptomNames.get(cs.symptom_id) ?? '',
-        severity: cs.severity,
-        note: cs.note ?? null,
-      })),
-      created_at: checkin.created_at!,
-      updated_at: checkin.updated_at!,
-    };
   }
 
-  private nativeSymptoms() {
-    return Database.getDb(
-      this.configService.getOrThrow<string>('MONGODB_CONNECTION'),
-      this.configService.getOrThrow<string>('MONGODB_DATABASE'),
-    ).collection<ISymptom>('symptoms');
+  private transaction<T>(
+    callback: (session: ClientSession) => Promise<T>,
+  ): Promise<T> {
+    return runTransaction(this.configService, callback);
   }
 
-  private nativeCheckins() {
-    return Database.getDb(
-      this.configService.getOrThrow<string>('MONGODB_CONNECTION'),
-      this.configService.getOrThrow<string>('MONGODB_DATABASE'),
-    ).collection<IDailyCheckin>('daily_checkins');
+  private symptoms(): Collection<ISymptom> {
+    return this.symptomModel
+      .query()
+      .getMongoDBCollection() as unknown as Collection<ISymptom>;
   }
 
-  private nativeCheckinSymptoms() {
-    return Database.getDb(
-      this.configService.getOrThrow<string>('MONGODB_CONNECTION'),
-      this.configService.getOrThrow<string>('MONGODB_DATABASE'),
-    ).collection<ICheckinSymptom>('checkin_symptoms');
+  private checkins(): Collection<IDailyCheckin> {
+    return this.checkinModel
+      .query()
+      .getMongoDBCollection() as unknown as Collection<IDailyCheckin>;
+  }
+
+  private checkinSymptoms(): Collection<ICheckinSymptom> {
+    return this.checkinSymptomModel
+      .query()
+      .getMongoDBCollection() as unknown as Collection<ICheckinSymptom>;
   }
 }

@@ -1,6 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { Database } from 'mongoloquent';
+import { DB, Database } from 'mongoloquent';
 import { ObjectId } from 'mongodb';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import request from 'supertest';
@@ -191,8 +191,10 @@ describe('TBuddy F00/F01 API (e2e)', () => {
       expect.objectContaining({
         username: patient.username,
         role: UserRole.PATIENT,
-        treatmentStatus: 'ON_TREATMENT',
+        treatmentStatus: 'NOT_PATIENT',
         isOnboardingCompleted: false,
+        hasActivePatientProfile: false,
+        hasPatientHistory: false,
       }),
     );
     expect(emailLogin.body.data.user.password_hash).toBeUndefined();
@@ -306,6 +308,187 @@ describe('TBuddy F00/F01 API (e2e)', () => {
       .send({ identifier: supporter.email, password: supporter.password })
       .expect(401);
     expect(inactive.body.code).toBe('INVALID_CREDENTIALS');
+  });
+
+  it('rolls back writes when a MongoDB transaction fails', async () => {
+    const collection = Database.getDb(mongoUri, databaseName).collection(
+      'transaction_rollback_probe',
+    );
+    const probeId = new ObjectId();
+
+    await expect(
+      DB.connection(mongoUri)
+        .database(databaseName)
+        .transaction(async (session) => {
+          await collection.insertOne({ _id: probeId }, { session });
+          throw new Error('rollback-probe');
+        }),
+    ).rejects.toThrow('rollback-probe');
+
+    await expect(collection.countDocuments({ _id: probeId })).resolves.toBe(0);
+  });
+
+  it('supports concurrent onboarding, close, history ownership, and a new episode', async () => {
+    const episodeUser = {
+      email: `episode.${suffix}@example.com`,
+      username: `episode_${suffix.slice(-8)}`,
+      password: 'Aman12345',
+      fullName: 'Episode Test',
+      role: UserRole.SUPPORTER,
+    };
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send(episodeUser)
+      .expect(201);
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({
+        identifier: episodeUser.username,
+        password: episodeUser.password,
+      })
+      .expect(200);
+    const authorization = `Bearer ${login.body.data.accessToken as string}`;
+    const onboarding = {
+      diagnosisDate: '2026-06-01',
+      treatmentStartDate: '2026-06-02',
+      medicineTime: '07:30',
+      pmo: {
+        name: 'PMO Episode',
+        email: `pmo.${suffix}@example.com`,
+      },
+    };
+
+    const onboardingResponses = await Promise.all([
+      request(app.getHttpServer())
+        .post('/api/v1/patients/me/onboarding')
+        .set('Authorization', authorization)
+        .send(onboarding),
+      request(app.getHttpServer())
+        .post('/api/v1/patients/me/onboarding')
+        .set('Authorization', authorization)
+        .send(onboarding),
+    ]);
+    expect(
+      onboardingResponses.map((response) => response.status).sort(),
+    ).toEqual([201, 409]);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/medicine-stocks')
+      .set('Authorization', authorization)
+      .send({
+        medicineName: 'OAT Episode',
+        medicineType: 'OAT',
+        quantity: 18,
+        dailyDose: 1,
+        thresholdQuantity: 7,
+      })
+      .expect(201);
+
+    const activeSession = await request(app.getHttpServer())
+      .get('/api/v1/auth/me')
+      .set('Authorization', authorization)
+      .expect(200);
+    expect(activeSession.body.data).toEqual(
+      expect.objectContaining({
+        role: UserRole.PATIENT,
+        treatmentStatus: 'ON_TREATMENT',
+        hasActivePatientProfile: true,
+        hasPatientHistory: true,
+      }),
+    );
+
+    const firstDashboard = await request(app.getHttpServer())
+      .get('/api/v1/patients/me/dashboard')
+      .set('Authorization', authorization)
+      .expect(200);
+    expect(firstDashboard.body.data).toEqual(
+      expect.objectContaining({
+        treatmentStartDate: expect.any(String),
+        stockDoses: 18,
+        hasCheckedInToday: false,
+      }),
+    );
+
+    await request(app.getHttpServer())
+      .post('/api/v1/patients/me/profile/close')
+      .set('Authorization', authorization)
+      .send({ outcome: 'RECOVERED', reason: 'E2E selesai.' })
+      .expect(201);
+
+    const closedSession = await request(app.getHttpServer())
+      .get('/api/v1/auth/me')
+      .set('Authorization', authorization)
+      .expect(200);
+    expect(closedSession.body.data).toEqual(
+      expect.objectContaining({
+        role: UserRole.SUPPORTER,
+        treatmentStatus: 'RECOVERED',
+        hasActivePatientProfile: false,
+        hasPatientHistory: true,
+      }),
+    );
+
+    const firstHistory = await request(app.getHttpServer())
+      .get('/api/v1/patients/me/history')
+      .set('Authorization', authorization)
+      .expect(200);
+    expect(firstHistory.body.data).toHaveLength(1);
+    const closedProfileId = firstHistory.body.data[0].id as string;
+
+    const otherUser = {
+      email: `history-owner.${suffix}@example.com`,
+      username: `owner_${suffix.slice(-8)}`,
+      password: 'Aman12345',
+      fullName: 'History Owner Test',
+      role: UserRole.SUPPORTER,
+    };
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send(otherUser)
+      .expect(201);
+    const otherLogin = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ identifier: otherUser.username, password: otherUser.password })
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/api/v1/patients/me/history/${closedProfileId}`)
+      .set(
+        'Authorization',
+        `Bearer ${otherLogin.body.data.accessToken as string}`,
+      )
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/patients/me/onboarding')
+      .set('Authorization', authorization)
+      .send({
+        diagnosisDate: '2026-06-10',
+        treatmentStartDate: '2026-06-11',
+        medicineTime: '08:00',
+      })
+      .expect(201);
+
+    const secondDashboard = await request(app.getHttpServer())
+      .get('/api/v1/patients/me/dashboard')
+      .set('Authorization', authorization)
+      .expect(200);
+    expect(secondDashboard.body.data).toEqual(
+      expect.objectContaining({
+        stockDoses: 0,
+        hasCheckedInToday: false,
+      }),
+    );
+
+    const secondHistory = await request(app.getHttpServer())
+      .get('/api/v1/patients/me/history')
+      .set('Authorization', authorization)
+      .expect(200);
+    expect(secondHistory.body.data).toHaveLength(2);
+    expect(
+      secondHistory.body.data.map(
+        (profile: { status: string }) => profile.status,
+      ),
+    ).toEqual(expect.arrayContaining(['ACTIVE', 'RECOVERED']));
   });
 
   describe('F07 health facilities and maps', () => {

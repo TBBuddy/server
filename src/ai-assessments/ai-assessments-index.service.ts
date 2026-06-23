@@ -17,8 +17,12 @@ export class AiAssessmentsIndexService implements OnApplicationBootstrap {
     const assessments = database.collection<IAiAssessment>('ai_assessments');
     await assessments.createIndexes([
       {
-        key: { patient_id: 1, created_at: -1 },
-        name: 'ai_assessments_patient_created',
+        key: { patient_profile_id: 1, created_at: -1 },
+        name: 'ai_assessments_profile_created',
+      },
+      {
+        key: { patient_id: 1, patient_profile_id: 1 },
+        name: 'ai_assessments_patient_profile',
       },
       { key: { risk_level: 1 }, name: 'ai_assessments_risk_level' },
       {

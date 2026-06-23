@@ -9,6 +9,8 @@ import { CheckinsIndexService } from './checkins-index.service';
 import { CheckinsController } from './checkins.controller';
 import { SymptomsController } from './symptoms.controller';
 import { UsersModule } from '../users/users.module';
+import { PatientsModule } from '../patients/patients.module';
+import { MedicineStocksModule } from '../medicine-stocks/medicine-stocks.module';
 
 @Module({
   imports: [
@@ -19,9 +21,11 @@ import { UsersModule } from '../users/users.module';
       PatientProfile,
     ]),
     UsersModule,
+    PatientsModule,
+    MedicineStocksModule,
   ],
   controllers: [CheckinsController, SymptomsController],
   providers: [CheckinsService, CheckinsIndexService],
-  exports: [CheckinsService],
+  exports: [CheckinsService, CheckinsIndexService],
 })
 export class CheckinsModule {}

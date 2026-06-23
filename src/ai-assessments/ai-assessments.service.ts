@@ -1,52 +1,73 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { Database } from 'mongoloquent';
 import { ObjectId } from 'mongodb';
-import { SeverityLevel } from '../common/enums/severity-level.enum';
+import { InjectModel } from '@mongoloquent/nestjs';
 import { AppException } from '../common/exceptions/app.exception';
 import { AiAssessmentProducer } from './ai-assessment.producer';
-import type { IAiAssessment } from './models/ai-assessment.model';
+import { AiAssessment, type IAiAssessment } from './models/ai-assessment.model';
 import type {
   AiAssessmentResponseDto,
   AiAssessmentDetailResponseDto,
   DailyTimelineItemDto,
 } from './dto/ai-assessment-response.dto';
+import { PatientsIndexService } from '../patients/patients-index.service';
+import { DailyCheckin } from '../checkins/models/daily-checkin.model';
+import {
+  CheckinSymptom,
+  type ICheckinSymptom,
+} from '../checkins/models/checkin-symptom.model';
+import { Symptom, type ISymptom } from '../checkins/models/symptom.model';
 
 @Injectable()
 export class AiAssessmentsService {
   constructor(
-    private readonly configService: ConfigService,
     private readonly producer: AiAssessmentProducer,
+    private readonly patientsIndex: PatientsIndexService,
+    @InjectModel(AiAssessment)
+    private readonly assessmentModel: typeof AiAssessment,
+    @InjectModel(DailyCheckin)
+    private readonly checkinModel: typeof DailyCheckin,
+    @InjectModel(CheckinSymptom)
+    private readonly checkinSymptomModel: typeof CheckinSymptom,
+    @InjectModel(Symptom)
+    private readonly symptomModel: typeof Symptom,
   ) {}
 
   async generate(patientId: string): Promise<{ job_id: string }> {
-    const jobId = await this.producer.enqueue(patientId);
+    const profile = await this.patientsIndex.getPatientProfile(patientId);
+    const jobId = await this.producer.enqueue(
+      patientId,
+      profile._id.toHexString(),
+    );
     return { job_id: jobId };
   }
 
   async getAssessments(patientId: string): Promise<AiAssessmentResponseDto[]> {
-    const assessments = await this.nativeAssessments()
-      .find({ patient_id: patientId })
-      .sort({ created_at: -1 })
-      .toArray();
+    const profile = await this.patientsIndex.getPatientProfile(patientId);
+    const assessments = await this.assessmentModel
+      .where('patient_id', patientId)
+      .where('patient_profile_id', profile._id.toHexString())
+      .orderBy('created_at', 'desc')
+      .get();
 
     return assessments.map((a) => this.toResponseDto(a));
   }
 
   async getLatest(patientId: string): Promise<AiAssessmentResponseDto | null> {
-    const assessment = await this.nativeAssessments()
-      .find({ patient_id: patientId })
-      .sort({ created_at: -1 })
-      .limit(1)
-      .toArray();
+    const profile = await this.patientsIndex.getPatientProfile(patientId);
+    const assessment = await this.assessmentModel
+      .where('patient_id', patientId)
+      .where('patient_profile_id', profile._id.toHexString())
+      .orderBy('created_at', 'desc')
+      .first();
 
-    return assessment[0] ? this.toResponseDto(assessment[0]) : null;
+    return assessment ? this.toResponseDto(assessment) : null;
   }
 
   async getById(
     patientId: string,
     assessmentId: string,
   ): Promise<AiAssessmentDetailResponseDto> {
+    const profile = await this.patientsIndex.getPatientProfile(patientId);
     if (!ObjectId.isValid(assessmentId)) {
       throw new AppException(
         404,
@@ -55,10 +76,11 @@ export class AiAssessmentsService {
       );
     }
 
-    const assessment = await this.nativeAssessments().findOne({
-      _id: new ObjectId(assessmentId),
-      patient_id: patientId,
-    });
+    const assessment = await this.assessmentModel
+      .where('_id', new ObjectId(assessmentId))
+      .where('patient_id', patientId)
+      .where('patient_profile_id', profile._id.toHexString())
+      .first();
 
     if (!assessment) {
       throw new AppException(
@@ -76,48 +98,43 @@ export class AiAssessmentsService {
   private async buildTimeline(
     assessment: IAiAssessment,
   ): Promise<DailyTimelineItemDto[]> {
-    const db = Database.getDb(
-      this.configService.getOrThrow<string>('MONGODB_CONNECTION'),
-      this.configService.getOrThrow<string>('MONGODB_DATABASE'),
-    );
-
-    const checkins = await db
-      .collection('daily_checkins')
-      .find({
-        patient_id: assessment.patient_id,
-        checkin_date: {
-          $gte: assessment.period_start_date,
-          $lte: assessment.period_end_date,
-        },
-      })
-      .sort({ checkin_date: 1 })
-      .toArray();
+    const checkins = await this.checkinModel
+      .where('patient_id', assessment.patient_id)
+      .where('patient_profile_id', assessment.patient_profile_id)
+      .where('checkin_date', '>=', assessment.period_start_date)
+      .where('checkin_date', '<=', assessment.period_end_date)
+      .orderBy('checkin_date', 'asc')
+      .get();
 
     if (checkins.length === 0) return [];
 
     const checkinIds = checkins.map((c) => String(c._id));
-    const checkinSymptoms = await db
-      .collection('checkin_symptoms')
-      .find({ checkin_id: { $in: checkinIds } })
-      .toArray();
+    const checkinSymptoms: ICheckinSymptom[] = Array.from(
+      await this.checkinSymptomModel
+        .whereIn('checkin_id', checkinIds)
+        .where('patient_profile_id', assessment.patient_profile_id)
+        .get(),
+    );
 
-    const symptomIds = [
-      ...new Set(checkinSymptoms.map((cs) => cs.symptom_id as string)),
-    ];
-    const symptoms =
+    const symptomIds = [...new Set(checkinSymptoms.map((cs) => cs.symptom_id))];
+    const symptoms: ISymptom[] =
       symptomIds.length > 0
-        ? await db
-            .collection('symptoms')
-            .find({ _id: { $in: symptomIds.map((id) => new ObjectId(id)) } })
-            .toArray()
+        ? Array.from(
+            await this.symptomModel
+              .whereIn(
+                '_id',
+                symptomIds.map((id) => new ObjectId(id)),
+              )
+              .get(),
+          )
         : [];
 
     const symptomNameMap = new Map(
-      symptoms.map((s) => [String(s._id), s.name as string]),
+      symptoms.map((s) => [String(s._id), s.name]),
     );
-    const symptomsByCheckin = new Map<string, typeof checkinSymptoms>();
+    const symptomsByCheckin = new Map<string, ICheckinSymptom[]>();
     for (const cs of checkinSymptoms) {
-      const key = cs.checkin_id as string;
+      const key = cs.checkin_id;
       const arr = symptomsByCheckin.get(key) ?? [];
       arr.push(cs);
       symptomsByCheckin.set(key, arr);
@@ -126,12 +143,10 @@ export class AiAssessmentsService {
     return checkins.map((c) => {
       const related = symptomsByCheckin.get(String(c._id)) ?? [];
       return {
-        date: (c.checkin_date as Date).toISOString().split('T')[0],
-        has_taken_medicine: c.has_taken_medicine as boolean,
-        severity: (c.severity as SeverityLevel) ?? null,
-        symptoms: related.map(
-          (cs) => symptomNameMap.get(cs.symptom_id as string) ?? '',
-        ),
+        date: c.checkin_date.toISOString().split('T')[0],
+        has_taken_medicine: c.has_taken_medicine,
+        severity: c.severity ?? null,
+        symptoms: related.map((cs) => symptomNameMap.get(cs.symptom_id) ?? ''),
       };
     });
   }
@@ -140,6 +155,7 @@ export class AiAssessmentsService {
     return {
       _id: String(a._id),
       patient_id: a.patient_id,
+      patient_profile_id: a.patient_profile_id,
       period_start_date: a.period_start_date,
       period_end_date: a.period_end_date,
       analyzed_days: a.analyzed_days,
@@ -150,12 +166,5 @@ export class AiAssessmentsService {
       model_name: a.model_name,
       created_at: a.created_at!,
     };
-  }
-
-  private nativeAssessments() {
-    return Database.getDb(
-      this.configService.getOrThrow<string>('MONGODB_CONNECTION'),
-      this.configService.getOrThrow<string>('MONGODB_DATABASE'),
-    ).collection<IAiAssessment>('ai_assessments');
   }
 }

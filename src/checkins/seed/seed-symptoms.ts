@@ -11,7 +11,9 @@ async function seedSymptoms(): Promise<void> {
 
   try {
     const result = await app.get(CheckinsService).seedSymptoms();
-    logger.log(`Seed symptoms: ${result}.`);
+    logger.log(
+      `Seed symptoms: ${result.insertedCount} inserted, ${result.existingCount} existing.`,
+    );
   } finally {
     await app.close();
   }

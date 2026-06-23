@@ -13,11 +13,15 @@ export class AiAssessmentProducer {
     private readonly queue: Queue<AiAssessmentJobData>,
   ) {}
 
-  async enqueue(patientId: string): Promise<string> {
-    const jobId = `${patientId}:${new Date().toISOString().slice(0, 10)}`;
+  async enqueue(patientId: string, patientProfileId: string): Promise<string> {
+    const jobId = `${patientProfileId}:${new Date().toISOString().slice(0, 10)}`;
     const job = await this.queue.add(
       'assess',
-      { patientId, requestedAt: new Date().toISOString() },
+      {
+        patientId,
+        patientProfileId,
+        requestedAt: new Date().toISOString(),
+      },
       {
         jobId,
         attempts: 3,
