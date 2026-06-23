@@ -29,6 +29,15 @@ describe('TBuddy F00/F01 API (e2e)', () => {
     role: UserRole.SUPPORTER,
   };
 
+  function dateOnlyAfter(days: number): string {
+    const date = new Date();
+    date.setDate(date.getDate() + days);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
   beforeAll(async () => {
     replSet = await MongoMemoryReplSet.create({
       replSet: { count: 1, storageEngine: 'wiredTiger' },
@@ -93,6 +102,11 @@ describe('TBuddy F00/F01 API (e2e)', () => {
     expect(response.body.paths['/api/v1/facilities']).toBeDefined();
     expect(response.body.paths['/api/v1/facilities/nearby']).toBeDefined();
     expect(response.body.paths['/api/v1/facilities/{id}']).toBeDefined();
+    expect(response.body.paths['/api/v1/travel-plans']).toBeDefined();
+    expect(response.body.paths['/api/v1/travel-plans/{id}']).toBeDefined();
+    expect(
+      response.body.paths['/api/v1/travel-plans/{id}/cancel'],
+    ).toBeDefined();
   });
 
   it('normalizes validation errors and rejects unknown fields', async () => {
@@ -489,6 +503,294 @@ describe('TBuddy F00/F01 API (e2e)', () => {
         (profile: { status: string }) => profile.status,
       ),
     ).toEqual(expect.arrayContaining(['ACTIVE', 'RECOVERED']));
+  });
+
+  describe('F08 travel mode CRUD lite', () => {
+    let authorization: string;
+    let planId: string;
+
+    beforeAll(async () => {
+      const travelUser = {
+        email: `travel.${suffix}@example.com`,
+        username: `travel_${suffix.slice(-8)}`,
+        password: 'Aman12345',
+        fullName: 'Travel Test',
+        role: UserRole.SUPPORTER,
+      };
+
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/register')
+        .send(travelUser)
+        .expect(201);
+      const login = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({
+          identifier: travelUser.username,
+          password: travelUser.password,
+        })
+        .expect(200);
+      authorization = `Bearer ${login.body.data.accessToken as string}`;
+
+      await request(app.getHttpServer())
+        .post('/api/v1/patients/me/onboarding')
+        .set('Authorization', authorization)
+        .send({
+          diagnosisDate: dateOnlyAfter(-30),
+          treatmentStartDate: dateOnlyAfter(-29),
+          medicineTime: '07:30',
+        })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post('/api/v1/medicine-stocks')
+        .set('Authorization', authorization)
+        .send({
+          medicineName: 'OAT Travel',
+          medicineType: 'OAT',
+          quantity: 3,
+          dailyDose: 1,
+          thresholdQuantity: 1,
+        })
+        .expect(201);
+    });
+
+    it('rejects longlat fields through the global validation whitelist', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/travel-plans')
+        .set('Authorization', authorization)
+        .send({
+          destination: 'Bandung, Jawa Barat',
+          departureDate: dateOnlyAfter(10),
+          returnDate: dateOnlyAfter(14),
+          lat: -6.9,
+          lng: 107.6,
+        })
+        .expect(400);
+
+      expect(response.body.code).toBe('VALIDATION_ERROR');
+      expect(
+        response.body.errors.map((error: { field: string }) => error.field),
+      ).toEqual(expect.arrayContaining(['lat', 'lng']));
+    });
+
+    it('creates a plan without persisted location or stock snapshots', async () => {
+      const create = await request(app.getHttpServer())
+        .post('/api/v1/travel-plans')
+        .set('Authorization', authorization)
+        .send({
+          destination: 'Bandung, Jawa Barat',
+          departureDate: dateOnlyAfter(10),
+          returnDate: dateOnlyAfter(14),
+        })
+        .expect(201);
+      expect(create.body).toEqual({
+        message: 'Rencana perjalanan berhasil dibuat.',
+      });
+
+      const storedPlan = await Database.getDb(mongoUri, databaseName)
+        .collection('travel_plans')
+        .findOne({ destination: 'Bandung, Jawa Barat' });
+      expect(storedPlan).toEqual(
+        expect.objectContaining({
+          destination: 'Bandung, Jawa Barat',
+          cancelled_at: null,
+        }),
+      );
+      expect(storedPlan?.lat).toBeUndefined();
+      expect(storedPlan?.lng).toBeUndefined();
+      expect(storedPlan?.latitude).toBeUndefined();
+      expect(storedPlan?.longitude).toBeUndefined();
+      expect(storedPlan?.location).toBeUndefined();
+      expect(storedPlan?.stockReadiness).toBeUndefined();
+      expect(storedPlan?.stock_readiness).toBeUndefined();
+      planId = storedPlan?._id.toString() ?? '';
+
+      const list = await request(app.getHttpServer())
+        .get('/api/v1/travel-plans')
+        .set('Authorization', authorization)
+        .expect(200);
+      expect(list.body.data).toHaveLength(1);
+      expect(list.body.data[0]).toEqual(
+        expect.objectContaining({
+          id: planId,
+          destination: 'Bandung, Jawa Barat',
+          durationDays: 5,
+          status: 'PLANNED',
+          isEditable: true,
+          stockReadiness: expect.objectContaining({
+            isAllStockEnough: false,
+            totalNeeded: 5,
+            totalAvailable: 3,
+          }),
+        }),
+      );
+      expect(list.body.data[0].stockReadiness.stocks[0]).toEqual(
+        expect.objectContaining({
+          medicineName: 'OAT Travel',
+          neededQuantity: 5,
+          availableQuantity: 3,
+          shortageQuantity: 2,
+        }),
+      );
+    });
+
+    it('rejects invalid travel dates', async () => {
+      const pastDeparture = await request(app.getHttpServer())
+        .post('/api/v1/travel-plans')
+        .set('Authorization', authorization)
+        .send({
+          destination: 'Tanggal lampau',
+          departureDate: dateOnlyAfter(-1),
+          returnDate: dateOnlyAfter(2),
+        })
+        .expect(400);
+      expect(pastDeparture.body.code).toBe('BUSINESS_RULE_VIOLATION');
+
+      const invalidReturn = await request(app.getHttpServer())
+        .post('/api/v1/travel-plans')
+        .set('Authorization', authorization)
+        .send({
+          destination: 'Tanggal kembali salah',
+          departureDate: dateOnlyAfter(10),
+          returnDate: dateOnlyAfter(9),
+        })
+        .expect(400);
+      expect(invalidReturn.body.code).toBe('BUSINESS_RULE_VIOLATION');
+    });
+
+    it('keeps travel plan detail private to the owner', async () => {
+      const otherUser = {
+        email: `travel-owner.${suffix}@example.com`,
+        username: `travel_owner_${suffix.slice(-8)}`,
+        password: 'Aman12345',
+        fullName: 'Travel Owner Test',
+        role: UserRole.SUPPORTER,
+      };
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/register')
+        .send(otherUser)
+        .expect(201);
+      const otherLogin = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ identifier: otherUser.username, password: otherUser.password })
+        .expect(200);
+      const otherAuthorization = `Bearer ${
+        otherLogin.body.data.accessToken as string
+      }`;
+      await request(app.getHttpServer())
+        .post('/api/v1/patients/me/onboarding')
+        .set('Authorization', otherAuthorization)
+        .send({
+          diagnosisDate: dateOnlyAfter(-10),
+          treatmentStartDate: dateOnlyAfter(-9),
+          medicineTime: '08:00',
+        })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .get(`/api/v1/travel-plans/${planId}`)
+        .set('Authorization', otherAuthorization)
+        .expect(404);
+    });
+
+    it('updates and cancels only editable plans', async () => {
+      const update = await request(app.getHttpServer())
+        .patch(`/api/v1/travel-plans/${planId}`)
+        .set('Authorization', authorization)
+        .send({
+          destination: 'Bandung Barat, Jawa Barat',
+          returnDate: dateOnlyAfter(15),
+        })
+        .expect(200);
+      expect(update.body).toEqual({
+        message: 'Rencana perjalanan berhasil diperbarui.',
+      });
+
+      const cancel = await request(app.getHttpServer())
+        .post(`/api/v1/travel-plans/${planId}/cancel`)
+        .set('Authorization', authorization)
+        .expect(200);
+      expect(cancel.body).toEqual({
+        message: 'Rencana perjalanan berhasil dibatalkan.',
+      });
+
+      const detail = await request(app.getHttpServer())
+        .get(`/api/v1/travel-plans/${planId}`)
+        .set('Authorization', authorization)
+        .expect(200);
+      expect(detail.body.data).toEqual(
+        expect.objectContaining({
+          destination: 'Bandung Barat, Jawa Barat',
+          status: 'CANCELLED',
+          isEditable: false,
+          cancelledAt: expect.any(String),
+        }),
+      );
+
+      const secondUpdate = await request(app.getHttpServer())
+        .patch(`/api/v1/travel-plans/${planId}`)
+        .set('Authorization', authorization)
+        .send({ destination: 'Tidak boleh berubah' })
+        .expect(409);
+      expect(secondUpdate.body.code).toBe('TRAVEL_PLAN_NOT_EDITABLE');
+    });
+
+    it('lists only the active episode and keeps old episode plans read-only', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/travel-plans')
+        .set('Authorization', authorization)
+        .send({
+          destination: 'Surabaya, Jawa Timur',
+          departureDate: dateOnlyAfter(20),
+          returnDate: dateOnlyAfter(22),
+        })
+        .expect(201);
+      const oldPlan = await Database.getDb(mongoUri, databaseName)
+        .collection('travel_plans')
+        .findOne({ destination: 'Surabaya, Jawa Timur' });
+      const oldPlanId = oldPlan?._id.toString() ?? '';
+
+      await request(app.getHttpServer())
+        .post('/api/v1/patients/me/profile/close')
+        .set('Authorization', authorization)
+        .send({ outcome: 'RECOVERED', reason: 'E2E episode selesai.' })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post('/api/v1/patients/me/onboarding')
+        .set('Authorization', authorization)
+        .send({
+          diagnosisDate: dateOnlyAfter(-2),
+          treatmentStartDate: dateOnlyAfter(-1),
+          medicineTime: '09:00',
+        })
+        .expect(201);
+
+      const list = await request(app.getHttpServer())
+        .get('/api/v1/travel-plans')
+        .set('Authorization', authorization)
+        .expect(200);
+      expect(list.body.data).toHaveLength(0);
+
+      const oldDetail = await request(app.getHttpServer())
+        .get(`/api/v1/travel-plans/${oldPlanId}`)
+        .set('Authorization', authorization)
+        .expect(200);
+      expect(oldDetail.body.data).toEqual(
+        expect.objectContaining({
+          id: oldPlanId,
+          destination: 'Surabaya, Jawa Timur',
+          isEditable: false,
+        }),
+      );
+
+      const updateOld = await request(app.getHttpServer())
+        .patch(`/api/v1/travel-plans/${oldPlanId}`)
+        .set('Authorization', authorization)
+        .send({ destination: 'Tidak boleh update episode lama' })
+        .expect(409);
+      expect(updateOld.body.code).toBe('TRAVEL_PLAN_NOT_EDITABLE');
+    });
   });
 
   describe('F07 health facilities and maps', () => {

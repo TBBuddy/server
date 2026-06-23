@@ -21,6 +21,7 @@ import {
   DailyCheckin,
   IDailyCheckin,
 } from '../checkins/models/daily-checkin.model';
+import { NotificationsService } from '../notifications/notifications.service';
 import { IUser, User } from '../users/user.model';
 import { runTransaction } from '../database/run-transaction';
 import { ClosePatientProfileDto } from './dto/close-patient-profile.dto';
@@ -55,6 +56,7 @@ export class PatientsService {
     @InjectModel(DailyCheckin)
     private readonly checkinModel: typeof DailyCheckin,
     private readonly configService: ConfigService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async createOnboarding(userId: string, dto: OnboardingDto): Promise<void> {
@@ -151,6 +153,11 @@ export class PatientsService {
       }
       throw error;
     }
+
+    await this.notificationsService.scheduleDailyMedicineReminders(
+      userId,
+      profileId.toHexString(),
+    );
   }
 
   async closeActiveProfile(
@@ -228,6 +235,11 @@ export class PatientsService {
         );
       }
     });
+
+    await this.notificationsService.cancelPendingEpisodeJobs(
+      userId,
+      profile._id.toHexString(),
+    );
   }
 
   async getOwnProfile(userId: string): Promise<PatientProfileResponseDto> {
@@ -319,7 +331,18 @@ export class PatientsService {
       changes.current_streak = 0;
     }
 
+    const medicineTimeChanged =
+      dto.medicineTime !== undefined &&
+      dto.medicineTime !== profile.medicine_time;
+
     await this.profileModel.where('_id', profile._id).update(changes);
+
+    if (medicineTimeChanged) {
+      await this.notificationsService.rescheduleDailyMedicineReminders(
+        userId,
+        profile._id.toHexString(),
+      );
+    }
   }
 
   async getDashboard(userId: string): Promise<PatientDashboardResponseDto> {

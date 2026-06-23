@@ -8,6 +8,7 @@ import { PatientPmo } from './models/patient-pmo.model';
 import { PatientsService } from './patients.service';
 import { PatientsIndexService } from './patients-index.service';
 import { PatientsController } from './patients.controller';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { PatientsController } from './patients.controller';
       MedicineStock,
       DailyCheckin,
     ]),
+    NotificationsModule,
   ],
   controllers: [PatientsController],
   providers: [PatientsService, PatientsIndexService],

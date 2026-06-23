@@ -11,6 +11,7 @@ import {
 } from 'mongodb';
 import { AppException } from '../common/exceptions/app.exception';
 import { runTransaction } from '../database/run-transaction';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PatientsIndexService } from '../patients/patients-index.service';
 import { AdjustMedicineDto } from './dto/adjust-medicine.dto';
 import { CreateMedicineStockDto } from './dto/create-medicine-stock.dto';
@@ -19,11 +20,17 @@ import { ListStockLogsQueryDto } from './dto/list-stock-logs-query.dto';
 import { RestockMedicineDto } from './dto/restock-medicine.dto';
 import { UpdateMedicineStockDto } from './dto/update-medicine-stock.dto';
 import {
+  MedicineStockSummaryDto,
+  TravelStockRequirementDto,
+  TravelStockRequirementSummaryDto,
+} from './dto/medicine-stock-response.dto';
+import {
   IMedicineStockLog,
   MedicineStockLog,
   StockLogReason,
 } from './models/medicine-stock-log.model';
 import { IMedicineStock, MedicineStock } from './models/medicine-stock.model';
+import { MedicineStockSerializer } from './serializers/medicine-stock.serializer';
 
 @Injectable()
 export class MedicineStocksService {
@@ -36,6 +43,7 @@ export class MedicineStocksService {
     private readonly stockLogModel: typeof MedicineStockLog,
     private readonly patientsIndex: PatientsIndexService,
     private readonly configService: ConfigService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async create(userId: string, dto: CreateMedicineStockDto): Promise<void> {
@@ -123,6 +131,61 @@ export class MedicineStocksService {
       .get();
 
     return { stocks, total };
+  }
+
+  async getActiveStockSummaryForProfile(
+    patientId: string,
+    patientProfileId: string,
+  ): Promise<MedicineStockSummaryDto[]> {
+    const stocks = await this.stockModel
+      .where('patient_id', patientId)
+      .where('patient_profile_id', patientProfileId)
+      .where('is_active', true)
+      .get();
+    return stocks.map((stock) => MedicineStockSerializer.toSummary(stock));
+  }
+
+  async calculateTravelRequirementForProfile(
+    patientId: string,
+    patientProfileId: string,
+    durationDays: number,
+  ): Promise<TravelStockRequirementSummaryDto> {
+    if (!Number.isInteger(durationDays) || durationDays <= 0) {
+      throw new AppException(
+        400,
+        'BUSINESS_RULE_VIOLATION',
+        'Durasi perjalanan harus berupa bilangan bulat positif.',
+      );
+    }
+
+    const summaries = await this.getActiveStockSummaryForProfile(
+      patientId,
+      patientProfileId,
+    );
+    const stocks: TravelStockRequirementDto[] = summaries.map((summary) => {
+      const needed = summary.dailyDose * durationDays;
+      const shortage = Math.max(0, needed - summary.quantity);
+      return {
+        stockId: summary.id,
+        medicineName: summary.medicineName,
+        dailyDose: summary.dailyDose,
+        durationDays,
+        neededQuantity: needed,
+        availableQuantity: summary.quantity,
+        isEnough: summary.quantity >= needed,
+        shortageQuantity: shortage,
+      };
+    });
+
+    return {
+      isAllStockEnough: stocks.every((stock) => stock.isEnough),
+      totalNeeded: stocks.reduce((acc, stock) => acc + stock.neededQuantity, 0),
+      totalAvailable: stocks.reduce(
+        (acc, stock) => acc + stock.availableQuantity,
+        0,
+      ),
+      stocks,
+    };
   }
 
   async findOne(userId: string, stockId: string): Promise<IMedicineStock> {
@@ -466,13 +529,13 @@ export class MedicineStocksService {
     }
   }
 
-  fireStockAlert(patientId: string, stockId: string): Promise<void> {
+  async fireStockAlert(patientId: string, stockId: string): Promise<void> {
     this.logger.log({
       command: 'STOCK_ALERT',
       patientId,
       stockId,
     });
-    return Promise.resolve();
+    await this.notificationsService.sendStockAlert(patientId, stockId);
   }
 
   private async consumeDailyDoseInSession(

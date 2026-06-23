@@ -164,6 +164,22 @@ export class UsersService {
     }
   }
 
+  async getPushTokens(id: string): Promise<string[]> {
+    if (!ObjectId.isValid(id)) {
+      throw this.userNotFound();
+    }
+
+    const user = await this.nativeUsersCollection().findOne(
+      { _id: new ObjectId(id) },
+      { projection: { push_notification_tokens: 1 } },
+    );
+    if (!user) {
+      throw this.userNotFound();
+    }
+
+    return user.push_notification_tokens ?? [];
+  }
+
   private nativeUsersCollection() {
     return Database.getDb(
       this.configService.getOrThrow<string>('MONGODB_CONNECTION'),

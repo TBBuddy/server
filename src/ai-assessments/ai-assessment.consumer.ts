@@ -12,6 +12,7 @@ import { PeriodCollectorService } from './period-collector.service';
 import { PiiRedactorService } from './pii-redactor.service';
 import { GeminiAdapterService } from './gemini-adapter.service';
 import { AiRiskLevel } from '../common/enums/ai-risk-level.enum';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AiAssessment } from './models/ai-assessment.model';
 import { AiAssessmentCheckinSymptom } from './models/ai-assessment-checkin-symptom.model';
 
@@ -27,6 +28,7 @@ export class AiAssessmentConsumer extends WorkerHost {
     private readonly assessmentModel: typeof AiAssessment,
     @InjectModel(AiAssessmentCheckinSymptom)
     private readonly junctionModel: typeof AiAssessmentCheckinSymptom,
+    private readonly notificationsService: NotificationsService,
   ) {
     super();
   }
@@ -86,7 +88,17 @@ export class AiAssessmentConsumer extends WorkerHost {
         geminiResult.risk_level === AiRiskLevel.HIGH ||
         geminiResult.should_consult_doctor
       ) {
-        // TODO(F06): send AI warning notification
+        await this.notificationsService.sendAiWarning(
+          patientId,
+          patientProfileId,
+          {
+            assessmentId,
+            riskLevel: geminiResult.risk_level,
+            shouldConsultDoctor: geminiResult.should_consult_doctor,
+            summary: geminiResult.summary,
+            recommendation: geminiResult.recommendation,
+          },
+        );
         this.logger.warn({
           msg: 'ai_assessment_high_risk',
           patientId,
