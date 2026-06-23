@@ -10,7 +10,6 @@ import {
   Patch,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -20,10 +19,8 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { AuthGuard } from '../auth/auth.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { RolesGuard } from '../common/guards/roles.guard';
 import { UserRole } from '../common/enums/user-role.enum';
 import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
@@ -44,7 +41,6 @@ import {
 
 @ApiTags('medicine-stocks')
 @ApiBearerAuth()
-@UseGuards(AuthGuard, RolesGuard)
 @Roles(UserRole.PATIENT)
 @Controller('medicine-stocks')
 export class MedicineStocksController {
