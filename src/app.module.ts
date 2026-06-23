@@ -20,6 +20,9 @@ import { Symptom } from './checkins/models/symptom.model';
 import { DailyCheckin } from './checkins/models/daily-checkin.model';
 import { CheckinSymptom } from './checkins/models/checkin-symptom.model';
 import { CheckinsModule } from './checkins/checkins.module';
+import { AiAssessment } from './ai-assessments/models/ai-assessment.model';
+import { AiAssessmentCheckinSymptom } from './ai-assessments/models/ai-assessment-checkin-symptom.model';
+import { AiAssessmentsModule } from './ai-assessments/ai-assessments.module';
 
 @Module({
   imports: [
@@ -31,7 +34,15 @@ import { CheckinsModule } from './checkins/checkins.module';
     MongoloquentModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      models: [User, HealthFacility, Symptom, DailyCheckin, CheckinSymptom],
+      models: [
+        User,
+        HealthFacility,
+        Symptom,
+        DailyCheckin,
+        CheckinSymptom,
+        AiAssessment,
+        AiAssessmentCheckinSymptom,
+      ],
       global: true,
       useFactory: (config: ConfigService) => ({
         connection: config.getOrThrow<string>('MONGODB_CONNECTION'),
@@ -67,6 +78,7 @@ import { CheckinsModule } from './checkins/checkins.module';
     MedicineStocksModule,
     FacilitiesModule,
     CheckinsModule,
+    AiAssessmentsModule,
   ],
   providers: [
     RequestContextMiddleware,

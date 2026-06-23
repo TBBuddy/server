@@ -28,6 +28,7 @@
     "seed:symptoms": "ts-node --transpile-only -r tsconfig-paths/register src/checkins/seed/seed-symptoms.ts"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@mongoloquent/nestjs": "^1.2.0",
     "@nestjs/bullmq": "^11.0.4",
     "@nestjs/common": "^11.0.1",
