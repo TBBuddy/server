@@ -88,9 +88,9 @@ export class CheckinsService {
   async createCheckin(
     userId: string,
     dto: CreateCheckinDto,
-    idempotencyKey: string,
+    // idempotencyKey: string,
   ): Promise<void> {
-    this.validateIdempotencyKey(idempotencyKey);
+    // this.validateIdempotencyKey(idempotencyKey);
     const profile = await this.patientsIndex.getPatientProfile(userId);
     const normalized = await this.normalizeInput(dto);
     const today = startOfDay(new Date());
@@ -494,7 +494,7 @@ export class CheckinsService {
       [SeverityLevel.MODERATE]: 2,
       [SeverityLevel.SEVERE]: 3,
     };
-    return symptoms.reduce(
+    return symptoms.reduce<SeverityLevel>(
       (highest, item) =>
         rank[item.severity] > rank[highest] ? item.severity : highest,
       SeverityLevel.NONE,

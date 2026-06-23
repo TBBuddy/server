@@ -13,7 +13,7 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
-  ApiHeader,
+  // ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -72,14 +72,14 @@ export class CheckinsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Simpan check-in hari ini' })
-  @ApiHeader({ name: 'Idempotency-Key', required: true })
+  // @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiCreatedResponse({ type: MessageResponseDto })
   async create(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateCheckinDto,
-    @Headers('idempotency-key') idempotencyKey: string,
+    // @Headers('idempotency-key') idempotencyKey: string,
   ): Promise<MessageResponseDto> {
-    await this.service.createCheckin(user.id, dto, idempotencyKey);
+    await this.service.createCheckin(user.id, dto);
     return { message: 'Check-in hari ini berhasil disimpan.' };
   }
 
