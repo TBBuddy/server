@@ -7,12 +7,14 @@ import { MedicineStocksIndexService } from './medicine-stocks-index.service';
 import { UsersModule } from '../users/users.module';
 import { MedicineStocksController } from './medicine-stocks.controller';
 import { PatientsModule } from '../patients/patients.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     MongoloquentModule.forFeature([MedicineStock, MedicineStockLog]),
     UsersModule,
     PatientsModule,
+    NotificationsModule,
   ],
   controllers: [MedicineStocksController],
   providers: [MedicineStocksService, MedicineStocksIndexService],

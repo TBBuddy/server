@@ -23,6 +23,9 @@ import { CheckinsModule } from './checkins/checkins.module';
 import { AiAssessment } from './ai-assessments/models/ai-assessment.model';
 import { AiAssessmentCheckinSymptom } from './ai-assessments/models/ai-assessment-checkin-symptom.model';
 import { AiAssessmentsModule } from './ai-assessments/ai-assessments.module';
+import { TravelPlansModule } from './travel-plans/travel-plans.module';
+import { Notification } from './notifications/models/notification.model';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -42,6 +45,7 @@ import { AiAssessmentsModule } from './ai-assessments/ai-assessments.module';
         CheckinSymptom,
         AiAssessment,
         AiAssessmentCheckinSymptom,
+        Notification,
       ],
       global: true,
       useFactory: (config: ConfigService) => ({
@@ -79,6 +83,8 @@ import { AiAssessmentsModule } from './ai-assessments/ai-assessments.module';
     FacilitiesModule,
     CheckinsModule,
     AiAssessmentsModule,
+    TravelPlansModule,
+    NotificationsModule,
   ],
   providers: [
     RequestContextMiddleware,

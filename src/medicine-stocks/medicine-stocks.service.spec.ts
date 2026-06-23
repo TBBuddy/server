@@ -62,6 +62,9 @@ describe('MedicineStocksService', () => {
       _id: new ObjectId(patientProfileId),
     }),
   } as unknown as PatientsIndexService;
+  const notificationsService = {
+    sendStockAlert: jest.fn(),
+  };
   const service = new MedicineStocksService(
     mockStockModel,
     mockStockLogModel,
@@ -71,10 +74,12 @@ describe('MedicineStocksService', () => {
         key === 'MONGODB_CONNECTION' ? 'mongodb://test' : 'test',
       ),
     } as unknown as ConfigService,
+    notificationsService as never,
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
+    notificationsService.sendStockAlert.mockResolvedValue(undefined);
     jest
       .spyOn(DB.prototype, 'transaction')
       .mockImplementation(async (callback) => callback(session));

@@ -140,4 +140,20 @@ export class MedicineStocksIndexService implements OnApplicationBootstrap {
       stocks,
     };
   }
+
+  /**
+   * Calculates travel stock readiness for a specific treatment episode.
+   * Used by F08 without letting Travel Mode read medicine stock collections directly.
+   */
+  async calculateTravelRequirementForProfile(
+    patientId: string,
+    patientProfileId: string,
+    durationDays: number,
+  ): Promise<TravelStockRequirementSummaryDto> {
+    return this.service.calculateTravelRequirementForProfile(
+      patientId,
+      patientProfileId,
+      durationDays,
+    );
+  }
 }

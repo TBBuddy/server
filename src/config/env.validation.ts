@@ -23,6 +23,12 @@ const schema = Joi.object({
   ADMIN_USERNAME: Joi.string().allow('').optional(),
   ADMIN_PASSWORD: Joi.string().allow('').optional(),
   ADMIN_FULL_NAME: Joi.string().allow('').default('TBuddy Administrator'),
+  MAIL_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
+  MAIL_USER: Joi.string().allow('').optional(),
+  MAIL_PASSWORD: Joi.string().allow('').optional(),
+  MAIL_FROM_NAME: Joi.string().allow('').default('TBuddy'),
+  EXPO_PUSH_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
+  EXPO_ACCESS_TOKEN: Joi.string().allow('').optional(),
 });
 
 export function validateEnvironment(config: Record<string, unknown>) {
