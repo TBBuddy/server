@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { ClientSession, ObjectId } from 'mongodb';
-import { DB, Database } from 'mongoloquent';
+import { DB } from 'mongoloquent';
 import { AppException } from '../common/exceptions/app.exception';
 import { SeverityLevel } from '../common/enums/severity-level.enum';
 import { MedicineStocksIndexService } from '../medicine-stocks/medicine-stocks-index.service';
@@ -23,6 +23,7 @@ describe('CheckinsService', () => {
     total_missed_days: 0,
     treatment_day_count: 1,
   };
+  const patientProfileId = profile._id.toHexString();
   const symptoms = {
     countDocuments: jest.fn(),
     find: jest.fn(),
@@ -48,10 +49,25 @@ describe('CheckinsService', () => {
     consumeDailyDose: jest.fn(),
     fireStockAlert: jest.fn(),
   };
+  const symptomModel = {
+    query: jest.fn(() => ({
+      getMongoDBCollection: jest.fn(() => symptoms),
+    })),
+  } as unknown as typeof Symptom;
+  const checkinModel = {
+    query: jest.fn(() => ({
+      getMongoDBCollection: jest.fn(() => checkins),
+    })),
+  } as unknown as typeof DailyCheckin;
+  const checkinSymptomModel = {
+    query: jest.fn(() => ({
+      getMongoDBCollection: jest.fn(() => checkinSymptoms),
+    })),
+  } as unknown as typeof CheckinSymptom;
   const service = new CheckinsService(
-    Symptom,
-    DailyCheckin,
-    CheckinSymptom,
+    symptomModel,
+    checkinModel,
+    checkinSymptomModel,
     patientsIndex as unknown as PatientsIndexService,
     medicineStocksIndex as unknown as MedicineStocksIndexService,
     {
@@ -79,15 +95,8 @@ describe('CheckinsService', () => {
         toArray: jest.fn().mockResolvedValue([]),
       }),
     });
-    jest.spyOn(Database, 'getDb').mockReturnValue({
-      collection: jest.fn((name: string) => {
-        if (name === 'symptoms') return symptoms;
-        if (name === 'daily_checkins') return checkins;
-        return checkinSymptoms;
-      }),
-    } as never);
     jest
-      .spyOn(DB, 'transaction')
+      .spyOn(DB.prototype, 'transaction')
       .mockImplementation(async (callback) => callback(session));
   });
 
@@ -105,6 +114,7 @@ describe('CheckinsService', () => {
     expect(checkins.insertOne).toHaveBeenCalledWith(
       expect.objectContaining({
         patient_id: patientId,
+        patient_profile_id: patientProfileId,
         has_taken_medicine: true,
         severity: SeverityLevel.NONE,
       }),
@@ -112,6 +122,7 @@ describe('CheckinsService', () => {
     );
     expect(medicineStocksIndex.consumeDailyDose).toHaveBeenCalledWith(
       patientId,
+      patientProfileId,
       expect.any(String),
       session,
     );
@@ -148,6 +159,7 @@ describe('CheckinsService', () => {
       [
         expect.objectContaining({
           symptom_id: symptomId.toHexString(),
+          patient_profile_id: patientProfileId,
           severity: SeverityLevel.SEVERE,
         }),
       ],
@@ -283,6 +295,7 @@ describe('CheckinsService', () => {
 
     expect(medicineStocksIndex.consumeDailyDose).toHaveBeenCalledWith(
       patientId,
+      patientProfileId,
       checkinId.toHexString(),
       session,
     );

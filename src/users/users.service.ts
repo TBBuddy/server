@@ -62,10 +62,7 @@ export class UsersService {
         phone_number: null,
         push_notification_tokens: [],
         role: dto.role,
-        treatment_status:
-          dto.role === UserRole.PATIENT
-            ? TreatmentStatus.ON_TREATMENT
-            : TreatmentStatus.NOT_PATIENT,
+        treatment_status: TreatmentStatus.NOT_PATIENT,
         is_verified: false,
         is_active: true,
         last_login_at: null,

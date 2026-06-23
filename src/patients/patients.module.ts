@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { MongoloquentModule } from '@mongoloquent/nestjs';
-import { UsersModule } from '../users/users.module';
+import { User } from '../users/user.model';
+import { MedicineStock } from '../medicine-stocks/models/medicine-stock.model';
+import { DailyCheckin } from '../checkins/models/daily-checkin.model';
 import { PatientProfile } from './models/patient-profile.model';
 import { PatientPmo } from './models/patient-pmo.model';
 import { PatientsService } from './patients.service';
@@ -9,8 +11,13 @@ import { PatientsController } from './patients.controller';
 
 @Module({
   imports: [
-    MongoloquentModule.forFeature([PatientProfile, PatientPmo]),
-    UsersModule,
+    MongoloquentModule.forFeature([
+      PatientProfile,
+      PatientPmo,
+      User,
+      MedicineStock,
+      DailyCheckin,
+    ]),
   ],
   controllers: [PatientsController],
   providers: [PatientsService, PatientsIndexService],

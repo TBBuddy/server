@@ -21,9 +21,11 @@ import { OnboardingDto } from './dto/onboarding.dto';
 import { UpdatePatientProfileDto } from './dto/update-patient-profile.dto';
 import { CreatePmoDto } from './dto/create-pmo.dto';
 import { UpdatePmoDto } from './dto/update-pmo.dto';
+import { ClosePatientProfileDto } from './dto/close-patient-profile.dto';
 import {
   PatientProfileDataResponseDto,
   PatientDashboardDataResponseDto,
+  PatientHistoryDataResponseDto,
 } from './dto/patient-response.dto';
 
 @ApiTags('patients')
@@ -34,13 +36,42 @@ export class PatientsController {
   constructor(private readonly patientsService: PatientsService) {}
 
   @Post('onboarding')
-  @Roles(UserRole.PATIENT)
+  @Roles(UserRole.PATIENT, UserRole.SUPPORTER)
   async onboarding(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: OnboardingDto,
   ): Promise<MessageResponseDto> {
     await this.patientsService.createOnboarding(user.id, dto);
     return { message: 'Onboarding berhasil diselesaikan.' };
+  }
+
+  @Post('profile/close')
+  @Roles(UserRole.PATIENT)
+  async closeProfile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ClosePatientProfileDto,
+  ): Promise<MessageResponseDto> {
+    await this.patientsService.closeActiveProfile(user.id, dto);
+    return { message: 'Episode pengobatan berhasil ditutup.' };
+  }
+
+  @Get('history')
+  @Roles(UserRole.PATIENT, UserRole.SUPPORTER)
+  async getHistory(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PatientHistoryDataResponseDto> {
+    return { data: await this.patientsService.getHistory(user.id) };
+  }
+
+  @Get('history/:id')
+  @Roles(UserRole.PATIENT, UserRole.SUPPORTER)
+  async getHistoryById(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') profileId: string,
+  ): Promise<PatientProfileDataResponseDto> {
+    return {
+      data: await this.patientsService.getHistoryById(user.id, profileId),
+    };
   }
 
   @Get('profile')

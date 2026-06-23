@@ -11,7 +11,6 @@ import {
   Sort,
   WithId,
 } from 'mongodb';
-import { DB, Database } from 'mongoloquent';
 import { AppException } from '../common/exceptions/app.exception';
 import { SeverityLevel } from '../common/enums/severity-level.enum';
 import { MedicineStocksIndexService } from '../medicine-stocks/medicine-stocks-index.service';
@@ -32,6 +31,7 @@ import {
 import { DailyCheckin, IDailyCheckin } from './models/daily-checkin.model';
 import { ISymptom, Symptom } from './models/symptom.model';
 import { symptomsSeed } from './seed/symptoms.seed';
+import { runTransaction } from '../database/run-transaction';
 
 interface PaginatedCheckins {
   data: DailyCheckinResponseDto[];
@@ -76,9 +76,10 @@ export class CheckinsService {
   async getTodayCheckin(
     userId: string,
   ): Promise<DailyCheckinResponseDto | null> {
-    await this.patientsIndex.getPatientProfile(userId);
+    const profile = await this.patientsIndex.getPatientProfile(userId);
     const checkin = await this.checkins().findOne({
       patient_id: userId,
+      patient_profile_id: profile._id.toHexString(),
       checkin_date: startOfDay(new Date()),
     });
     return checkin ? this.buildCheckinResponse(checkin) : null;
@@ -94,9 +95,11 @@ export class CheckinsService {
     const normalized = await this.normalizeInput(dto);
     const today = startOfDay(new Date());
     const checkinId = new ObjectId();
+    const patientProfileId = profile._id.toHexString();
 
     const existing = await this.checkins().findOne({
       patient_id: userId,
+      patient_profile_id: patientProfileId,
       checkin_date: today,
     });
     if (existing) {
@@ -105,12 +108,13 @@ export class CheckinsService {
     }
 
     try {
-      const stockAlerts = await DB.transaction(async (session) => {
+      const stockAlerts = await this.transaction(async (session) => {
         const now = new Date();
         await this.checkins().insertOne(
           {
             _id: checkinId,
             patient_id: userId,
+            patient_profile_id: patientProfileId,
             checkin_date: today,
             treatment_day_number: this.treatmentDay(profile, today),
             has_taken_medicine: normalized.hasTakenMedicine,
@@ -127,6 +131,7 @@ export class CheckinsService {
         await this.replaceSymptoms(
           checkinId.toHexString(),
           userId,
+          patientProfileId,
           normalized.symptoms,
           session,
         );
@@ -134,6 +139,7 @@ export class CheckinsService {
         const alerts = normalized.hasTakenMedicine
           ? await this.medicineStocksIndex.consumeDailyDose(
               userId,
+              patientProfileId,
               checkinId.toHexString(),
               session,
             )
@@ -159,6 +165,7 @@ export class CheckinsService {
       if (error instanceof MongoServerError && error.code === 11000) {
         const concurrent = await this.checkins().findOne({
           patient_id: userId,
+          patient_profile_id: patientProfileId,
           checkin_date: today,
         });
         if (concurrent) {
@@ -175,8 +182,14 @@ export class CheckinsService {
     checkinId: string,
     dto: UpdateCheckinDto,
   ): Promise<void> {
+    const profile = await this.patientsIndex.getPatientProfile(userId);
+    const patientProfileId = profile._id.toHexString();
     const objectId = new ObjectId(checkinId);
-    const existing = await this.requireOwnedCheckin(userId, objectId);
+    const existing = await this.requireOwnedCheckin(
+      userId,
+      patientProfileId,
+      objectId,
+    );
     if (
       startOfDay(existing.checkin_date).getTime() !==
       startOfDay(new Date()).getTime()
@@ -216,9 +229,13 @@ export class CheckinsService {
         })),
     });
 
-    const stockAlerts = await DB.transaction(async (session) => {
+    const stockAlerts = await this.transaction(async (session) => {
       await this.checkins().updateOne(
-        { _id: objectId, patient_id: userId },
+        {
+          _id: objectId,
+          patient_id: userId,
+          patient_profile_id: patientProfileId,
+        },
         {
           $set: {
             has_taken_medicine: normalized.hasTakenMedicine,
@@ -235,12 +252,14 @@ export class CheckinsService {
       await this.replaceSymptoms(
         checkinId,
         userId,
+        patientProfileId,
         normalized.symptoms,
         session,
       );
       if (!existing.has_taken_medicine && normalized.hasTakenMedicine) {
         const alerts = await this.medicineStocksIndex.consumeDailyDose(
           userId,
+          patientProfileId,
           checkinId,
           session,
         );
@@ -265,9 +284,13 @@ export class CheckinsService {
     userId: string,
     dto: GetCheckinsDto,
   ): Promise<PaginatedCheckins> {
+    const profile = await this.patientsIndex.getPatientProfile(userId);
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 20;
-    const filter: Filter<IDailyCheckin> = { patient_id: userId };
+    const filter: Filter<IDailyCheckin> = {
+      patient_id: userId,
+      patient_profile_id: profile._id.toHexString(),
+    };
     if ((dto.year === undefined) !== (dto.month === undefined)) {
       throw new AppException(
         400,
@@ -311,8 +334,13 @@ export class CheckinsService {
     userId: string,
     checkinId: string,
   ): Promise<DailyCheckinResponseDto> {
+    const profile = await this.patientsIndex.getPatientProfile(userId);
     return this.buildCheckinResponse(
-      await this.requireOwnedCheckin(userId, new ObjectId(checkinId)),
+      await this.requireOwnedCheckin(
+        userId,
+        profile._id.toHexString(),
+        new ObjectId(checkinId),
+      ),
     );
   }
 
@@ -476,6 +504,7 @@ export class CheckinsService {
   private async replaceSymptoms(
     checkinId: string,
     patientId: string,
+    patientProfileId: string,
     symptoms: CreateCheckinSymptomDto[],
     session: ClientSession,
   ): Promise<void> {
@@ -489,6 +518,7 @@ export class CheckinsService {
         _id: new ObjectId(),
         checkin_id: checkinId,
         patient_id: patientId,
+        patient_profile_id: patientProfileId,
         symptom_id: item.symptomId,
         severity: item.severity,
         note: item.note ?? null,
@@ -542,11 +572,13 @@ export class CheckinsService {
 
   private async requireOwnedCheckin(
     userId: string,
+    patientProfileId: string,
     checkinId: ObjectId,
   ): Promise<WithId<IDailyCheckin>> {
     const checkin = await this.checkins().findOne({
       _id: checkinId,
       patient_id: userId,
+      patient_profile_id: patientProfileId,
     });
     if (!checkin) {
       throw new AppException(
@@ -579,22 +611,27 @@ export class CheckinsService {
     }
   }
 
-  private database() {
-    return Database.getDb(
-      this.configService.getOrThrow<string>('MONGODB_CONNECTION'),
-      this.configService.getOrThrow<string>('MONGODB_DATABASE'),
-    );
+  private transaction<T>(
+    callback: (session: ClientSession) => Promise<T>,
+  ): Promise<T> {
+    return runTransaction(this.configService, callback);
   }
 
   private symptoms(): Collection<ISymptom> {
-    return this.database().collection<ISymptom>('symptoms');
+    return this.symptomModel
+      .query()
+      .getMongoDBCollection() as unknown as Collection<ISymptom>;
   }
 
   private checkins(): Collection<IDailyCheckin> {
-    return this.database().collection<IDailyCheckin>('daily_checkins');
+    return this.checkinModel
+      .query()
+      .getMongoDBCollection() as unknown as Collection<IDailyCheckin>;
   }
 
   private checkinSymptoms(): Collection<ICheckinSymptom> {
-    return this.database().collection<ICheckinSymptom>('checkin_symptoms');
+    return this.checkinSymptomModel
+      .query()
+      .getMongoDBCollection() as unknown as Collection<ICheckinSymptom>;
   }
 }

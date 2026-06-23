@@ -4,6 +4,7 @@ import { SeverityLevel } from '../../common/enums/severity-level.enum';
 export interface ICheckinSymptom extends IMongoloquentSchema {
   checkin_id: string;
   patient_id: string;
+  patient_profile_id: string;
   symptom_id: string;
   severity: SeverityLevel;
   note: string | null;
