@@ -19,6 +19,7 @@ import { ListMedicineStocksQueryDto } from './dto/list-medicine-stocks-query.dto
 import { ListStockLogsQueryDto } from './dto/list-stock-logs-query.dto';
 import { RestockMedicineDto } from './dto/restock-medicine.dto';
 import { UpdateMedicineStockDto } from './dto/update-medicine-stock.dto';
+import { UpdateMedicineStockStatusDto } from './dto/update-medicine-stock-status.dto';
 import {
   MedicineStockSummaryDto,
   TravelStockRequirementDto,
@@ -255,6 +256,23 @@ export class MedicineStocksService {
     ) {
       await this.fireStockAlert(userId, stockId);
     }
+  }
+
+  async updateStatus(
+    userId: string,
+    stockId: string,
+    dto: UpdateMedicineStockStatusDto,
+  ): Promise<void> {
+    const stock = await this.findOne(userId, stockId);
+
+    await this.stockModel
+      .where('_id', this.parseStockId(stockId))
+      .where('patient_id', userId)
+      .where('patient_profile_id', stock.patient_profile_id)
+      .update({
+        is_active: dto.isActive,
+        updated_at: new Date(),
+      });
   }
 
   async restock(

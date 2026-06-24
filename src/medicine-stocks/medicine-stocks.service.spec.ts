@@ -76,6 +76,12 @@ describe('MedicineStocksService', () => {
     } as unknown as ConfigService,
     notificationsService as never,
   );
+  const lastStockUpdate = (): Partial<IMedicineStock> => {
+    const calls = stockQuery.update.mock.calls as unknown as [
+      Partial<IMedicineStock>,
+    ][];
+    return calls[calls.length - 1][0];
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -150,6 +156,76 @@ describe('MedicineStocksService', () => {
     await service.deactivate(patientId, stockId.toHexString());
 
     expect(stockQuery.update).toHaveBeenCalledWith({ is_active: false });
+  });
+
+  it('updates active status from active to inactive', async () => {
+    stockQuery.first.mockResolvedValue(baseStock);
+    stockQuery.update.mockResolvedValue({
+      ...baseStock,
+      is_active: false,
+    });
+
+    await service.updateStatus(patientId, stockId.toHexString(), {
+      isActive: false,
+    });
+
+    expect(stockQuery.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        is_active: false,
+      }),
+    );
+    expect(lastStockUpdate().updated_at).toBeInstanceOf(Date);
+  });
+
+  it('updates active status from inactive to active', async () => {
+    stockQuery.first.mockResolvedValue({ ...baseStock, is_active: false });
+    stockQuery.update.mockResolvedValue({
+      ...baseStock,
+      is_active: true,
+    });
+
+    await service.updateStatus(patientId, stockId.toHexString(), {
+      isActive: true,
+    });
+
+    expect(stockQuery.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        is_active: true,
+      }),
+    );
+    expect(lastStockUpdate().updated_at).toBeInstanceOf(Date);
+  });
+
+  it('accepts repeated active status updates idempotently', async () => {
+    stockQuery.first.mockResolvedValue(baseStock);
+    stockQuery.update.mockResolvedValue(baseStock);
+
+    await service.updateStatus(patientId, stockId.toHexString(), {
+      isActive: true,
+    });
+
+    expect(stockQuery.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        is_active: true,
+      }),
+    );
+    expect(lastStockUpdate().updated_at).toBeInstanceOf(Date);
+  });
+
+  it('rejects status updates for unknown or unowned stock', async () => {
+    stockQuery.first.mockResolvedValue(null);
+
+    await expect(
+      service.updateStatus(patientId, stockId.toHexString(), {
+        isActive: false,
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<AppException>>({
+        statusCode: 404,
+        code: 'RESOURCE_NOT_FOUND',
+      }),
+    );
+    expect(stockQuery.update).not.toHaveBeenCalled();
   });
 
   it('restocks stock and writes its audit log in the same session', async () => {

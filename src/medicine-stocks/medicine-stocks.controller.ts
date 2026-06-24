@@ -28,6 +28,7 @@ import { MedicineStocksService } from './medicine-stocks.service';
 import { MedicineStockSerializer } from './serializers/medicine-stock.serializer';
 import { CreateMedicineStockDto } from './dto/create-medicine-stock.dto';
 import { UpdateMedicineStockDto } from './dto/update-medicine-stock.dto';
+import { UpdateMedicineStockStatusDto } from './dto/update-medicine-stock-status.dto';
 import { RestockMedicineDto } from './dto/restock-medicine.dto';
 import { AdjustMedicineDto } from './dto/adjust-medicine.dto';
 import { ListMedicineStocksQueryDto } from './dto/list-medicine-stocks-query.dto';
@@ -103,6 +104,19 @@ export class MedicineStocksController {
   ): Promise<MessageResponseDto> {
     await this.service.update(user.id, params.id, dto);
     return { message: 'Data stok obat berhasil diperbarui.' };
+  }
+
+  @Patch(':id/status')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Perbarui status aktif stok obat' })
+  @ApiOkResponse({ type: MessageResponseDto })
+  async updateStatus(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: MedicineStockIdParamDto,
+    @Body() dto: UpdateMedicineStockStatusDto,
+  ): Promise<MessageResponseDto> {
+    await this.service.updateStatus(user.id, params.id, dto);
+    return { message: 'Status stok obat berhasil diperbarui.' };
   }
 
   @Post(':id/restock')
