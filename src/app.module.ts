@@ -26,6 +26,11 @@ import { AiAssessmentsModule } from './ai-assessments/ai-assessments.module';
 import { TravelPlansModule } from './travel-plans/travel-plans.module';
 import { Notification } from './notifications/models/notification.model';
 import { NotificationsModule } from './notifications/notifications.module';
+import { ForumModule } from './forum/forum.module';
+import { ForumPost } from './forum/models/forum-post.model';
+import { ForumComment } from './forum/models/forum-comment.model';
+import { ForumLike } from './forum/models/forum-like.model';
+import { UploadsModule } from './uploads/uploads.module';
 
 @Module({
   imports: [
@@ -46,6 +51,9 @@ import { NotificationsModule } from './notifications/notifications.module';
         AiAssessment,
         AiAssessmentCheckinSymptom,
         Notification,
+        ForumPost,
+        ForumComment,
+        ForumLike,
       ],
       global: true,
       useFactory: (config: ConfigService) => ({
@@ -85,6 +93,8 @@ import { NotificationsModule } from './notifications/notifications.module';
     AiAssessmentsModule,
     TravelPlansModule,
     NotificationsModule,
+    ForumModule,
+    UploadsModule,
   ],
   providers: [
     RequestContextMiddleware,

@@ -29,6 +29,13 @@ const schema = Joi.object({
   MAIL_FROM_NAME: Joi.string().allow('').default('TBuddy'),
   EXPO_PUSH_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
   EXPO_ACCESS_TOKEN: Joi.string().allow('').optional(),
+  CLOUDINARY_ENABLED: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .default(false),
+  CLOUDINARY_CLOUD_NAME: Joi.string().allow('').optional(),
+  CLOUDINARY_API_KEY: Joi.string().allow('').optional(),
+  CLOUDINARY_API_SECRET: Joi.string().allow('').optional(),
 });
 
 export function validateEnvironment(config: Record<string, unknown>) {
