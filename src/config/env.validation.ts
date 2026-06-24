@@ -15,7 +15,7 @@ const schema = Joi.object({
   REDIS_PORT: Joi.number().port().default(6379),
   REDIS_USERNAME: Joi.string().allow('').optional(),
   REDIS_PASSWORD: Joi.string().allow('').optional(),
-  REDIS_PREFIX: Joi.string().valid('tbbudy').default('tbbudy'),
+  REDIS_PREFIX: Joi.string().default('tbbudy'),
   JWT_SECRET: Joi.string().min(32).required(),
   // JWT_EXPIRES_IN: Joi.number().integer().positive().default(3600),
   BCRYPT_ROUNDS: Joi.number().integer().min(10).max(14).default(12),
