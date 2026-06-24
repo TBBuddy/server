@@ -1,4 +1,10 @@
-import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@mongoloquent/nestjs';
 import { addDays, startOfDay } from 'date-fns';
@@ -11,6 +17,11 @@ import {
   WithId,
 } from 'mongodb';
 import { AppException } from '../common/exceptions/app.exception';
+import {
+  AiAssessment,
+  IAiAssessment,
+} from '../ai-assessments/models/ai-assessment.model';
+import { AiRiskLevel } from '../common/enums/ai-risk-level.enum';
 import { PatientProfileStatus } from '../common/enums/patient-profile-status.enum';
 import {
   DailyCheckin,
@@ -21,12 +32,17 @@ import {
   MedicineStock,
 } from '../medicine-stocks/models/medicine-stock.model';
 import { PatientPmo, IPatientPmo } from '../patients/models/patient-pmo.model';
+import { ITravelPlan, TravelPlan } from '../travel-plans/models/travel-plan.model';
 import {
   IPatientProfile,
   PatientProfile,
 } from '../patients/models/patient-profile.model';
 import { UsersService } from '../users/users.service';
 import { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
+import {
+  TestNotificationDto,
+  TestNotificationResponseDto,
+} from './dto/test-notification.dto';
 import { NotificationResponseDto } from './dto/notification-response.dto';
 import { NotificationDeliveryStatus } from './enums/notification-status.enum';
 import { NotificationType } from './enums/notification-type.enum';
@@ -99,6 +115,10 @@ export class NotificationsService implements OnApplicationBootstrap {
     private readonly checkinModel: typeof DailyCheckin,
     @InjectModel(MedicineStock)
     private readonly stockModel: typeof MedicineStock,
+    @InjectModel(AiAssessment)
+    private readonly assessmentModel: typeof AiAssessment,
+    @InjectModel(TravelPlan)
+    private readonly travelPlanModel: typeof TravelPlan,
     private readonly usersService: UsersService,
     private readonly producer: NotificationProducer,
     private readonly pushProvider: ExpoPushProvider,
@@ -258,13 +278,136 @@ export class NotificationsService implements OnApplicationBootstrap {
     await this.producer.cancelPendingByMetadata(metadata);
   }
 
-  async sendStockAlert(patientId: string, stockId: string): Promise<void> {
-    if (!ObjectId.isValid(stockId)) return;
+  async cancelTravelReminder(travelPlanId: string): Promise<void> {
+    await this.producer.cancelTravelReminder(travelPlanId);
+  }
+
+  async scheduleTestNotification(
+    userId: string,
+    dto: TestNotificationDto,
+  ): Promise<TestNotificationResponseDto> {
+    if (this.configService.get<string>('NODE_ENV') === 'production') {
+      throw new ForbiddenException('Endpoint test notification tidak tersedia di production.');
+    }
+
+    const delaySeconds = dto.delaySeconds ?? 5;
+    const delayMs = delaySeconds * 1000;
+    const profile = await this.getActiveProfile(userId);
+    if (!profile) {
+      throw new BadRequestException('User tidak memiliki patient profile aktif untuk test notification.');
+    }
+
+    const patientProfileId = profile._id.toHexString();
+    const now = new Date();
+    const scheduledFor = new Date(now.getTime() + delayMs).toISOString();
+    const reminderDate = this.dateKey(now);
+    let jobId: string | null;
+
+    switch (dto.type) {
+      case NotificationType.MEDICINE_REMINDER_BEFORE:
+        jobId = await this.producer.enqueueTestMedicineReminder(
+          {
+            patientId: userId,
+            patientProfileId,
+            medicineTime: profile.medicine_time,
+            reminderDate,
+            scheduledFor,
+            kind: 'BEFORE',
+          },
+          delayMs,
+        );
+        break;
+      case NotificationType.MEDICINE_REMINDER_TIME:
+        jobId = await this.producer.enqueueTestMedicineReminder(
+          {
+            patientId: userId,
+            patientProfileId,
+            medicineTime: profile.medicine_time,
+            reminderDate,
+            scheduledFor,
+            kind: 'TIME',
+          },
+          delayMs,
+        );
+        break;
+      case NotificationType.MEDICINE_SKIP_ALERT:
+        jobId = await this.producer.enqueueTestMedicineSkipEvaluation(
+          {
+            patientId: userId,
+            patientProfileId,
+            medicineTime: profile.medicine_time,
+            reminderDate,
+            scheduledFor,
+          },
+          delayMs,
+        );
+        break;
+      case NotificationType.STOCK_ALERT: {
+        const stock = await this.findTestStock(userId, patientProfileId);
+        jobId = await this.sendStockAlert(userId, stock._id.toHexString(), delayMs);
+        break;
+      }
+      case NotificationType.AI_WARNING: {
+        const assessment = await this.findTestAiWarningAssessment(
+          userId,
+          patientProfileId,
+        );
+        jobId = await this.sendAiWarning(
+          userId,
+          patientProfileId,
+          {
+            assessmentId: assessment._id.toHexString(),
+            riskLevel: assessment.risk_level,
+            shouldConsultDoctor: assessment.should_consult_doctor,
+            summary: assessment.summary,
+            recommendation: assessment.recommendation,
+          },
+          delayMs,
+        );
+        break;
+      }
+      case NotificationType.TRAVEL_REMINDER_H1: {
+        const plan = await this.findTestTravelPlan(userId, patientProfileId);
+        jobId = await this.producer.enqueueTestTravelReminder(
+          {
+            travelPlanId: plan._id.toHexString(),
+            patientId: userId,
+            patientProfileId,
+            destination: plan.destination,
+            departureDate: this.dateKey(startOfDay(plan.departure_date)),
+            scheduledFor,
+          },
+          delayMs,
+        );
+        break;
+      }
+      default:
+        throw new BadRequestException('Type notification test tidak valid.');
+    }
+
+    if (!jobId) {
+      throw new BadRequestException('Notification test gagal diantrekan karena data tidak valid.');
+    }
+
+    return {
+      queued: true,
+      type: dto.type,
+      delaySeconds,
+      jobId,
+    };
+  }
+
+  async sendStockAlert(
+    patientId: string,
+    stockId: string,
+    delayMs = 0,
+  ): Promise<string | null> {
+    if (!ObjectId.isValid(stockId)) return null;
     const stock = await this.stocks().findOne({
       _id: new ObjectId(stockId),
       patient_id: patientId,
     });
-    if (!stock) return;
+    if (!stock) return null;
 
     const notification = await this.createNotification({
       recipientUserId: patientId,
@@ -283,14 +426,15 @@ export class NotificationsService implements OnApplicationBootstrap {
       logicalKey: `stock-alert:${stock.patient_profile_id}:${stockId}:${this.dateKey(new Date())}`,
       push: true,
     });
-    await this.producer.enqueueSend(notification._id.toHexString());
+    return this.producer.enqueueSend(notification._id.toHexString(), delayMs);
   }
 
   async sendAiWarning(
     patientId: string,
     patientProfileId: string,
     input: AiWarningInput,
-  ): Promise<void> {
+    delayMs = 0,
+  ): Promise<string> {
     const email = await this.buildPmoEmail(patientId, patientProfileId, {
       subject: 'Peringatan risiko pasien TBuddy',
       html: `
@@ -327,7 +471,7 @@ export class NotificationsService implements OnApplicationBootstrap {
       email,
       emailSkipReason: email ? null : 'PMO_EMAIL_MISSING',
     });
-    await this.producer.enqueueSend(notification._id.toHexString());
+    return this.producer.enqueueSend(notification._id.toHexString(), delayMs);
   }
 
   async handleMedicineReminder(job: MedicineReminderJobData): Promise<void> {
@@ -727,6 +871,63 @@ export class NotificationsService implements OnApplicationBootstrap {
     );
   }
 
+  private async findTestStock(
+    patientId: string,
+    patientProfileId: string,
+  ): Promise<WithId<IMedicineStock>> {
+    const stock = await this.stocks().findOne(
+      {
+        patient_id: patientId,
+        patient_profile_id: patientProfileId,
+        is_active: true,
+      },
+      { sort: { quantity: 1, created_at: 1 } },
+    );
+    if (!stock) {
+      throw new BadRequestException('Tidak ada stok obat aktif milik user untuk test STOCK_ALERT.');
+    }
+    return stock;
+  }
+
+  private async findTestAiWarningAssessment(
+    patientId: string,
+    patientProfileId: string,
+  ): Promise<WithId<IAiAssessment>> {
+    const assessment = await this.assessments().findOne(
+      {
+        patient_id: patientId,
+        patient_profile_id: patientProfileId,
+        $or: [
+          { risk_level: AiRiskLevel.HIGH },
+          { should_consult_doctor: true },
+        ],
+      },
+      { sort: { created_at: -1 } },
+    );
+    if (!assessment) {
+      throw new BadRequestException('Tidak ada AI assessment berisiko milik user untuk test AI_WARNING.');
+    }
+    return assessment;
+  }
+
+  private async findTestTravelPlan(
+    patientId: string,
+    patientProfileId: string,
+  ): Promise<WithId<ITravelPlan>> {
+    const plan = await this.travelPlans().findOne(
+      {
+        patient_id: patientId,
+        patient_profile_id: patientProfileId,
+        cancelled_at: null,
+      },
+      { sort: { departure_date: 1, created_at: 1 } },
+    );
+    if (!plan) {
+      throw new BadRequestException('Tidak ada travel plan aktif milik user untuk test TRAVEL_REMINDER_H1.');
+    }
+    return plan;
+  }
+
   private cloneChannels(
     channels: NotificationChannelResults,
   ): NotificationChannelResults {
@@ -830,6 +1031,18 @@ export class NotificationsService implements OnApplicationBootstrap {
     return this.checkinModel
       .query()
       .getMongoDBCollection() as unknown as Collection<IDailyCheckin>;
+  }
+
+  private assessments(): Collection<IAiAssessment> {
+    return this.assessmentModel
+      .query()
+      .getMongoDBCollection() as unknown as Collection<IAiAssessment>;
+  }
+
+  private travelPlans(): Collection<ITravelPlan> {
+    return this.travelPlanModel
+      .query()
+      .getMongoDBCollection() as unknown as Collection<ITravelPlan>;
   }
 
   private stocks(): Collection<IMedicineStock> {

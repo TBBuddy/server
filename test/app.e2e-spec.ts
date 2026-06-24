@@ -49,7 +49,7 @@ describe('TBuddy F00/F01 API (e2e)', () => {
     process.env.REDIS_ENABLED = 'false';
     process.env.JWT_SECRET =
       'tbuddy-e2e-jwt-secret-with-at-least-32-characters';
-    process.env.JWT_EXPIRES_IN = '3600';
+    // process.env.JWT_EXPIRES_IN = '3600';
     process.env.BCRYPT_ROUNDS = '10';
     process.env.API_PREFIX = 'api/v1';
 

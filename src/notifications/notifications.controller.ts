@@ -1,5 +1,21 @@
-import { Controller, Get, HttpCode, HttpStatus, Param, Patch, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
@@ -7,6 +23,10 @@ import { UserRole } from '../common/enums/user-role.enum';
 import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
 import { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
 import { NotificationIdParamDto } from './dto/notification-id-param.dto';
+import {
+  TestNotificationDto,
+  TestNotificationResponseDto,
+} from './dto/test-notification.dto';
 import {
   NotificationDataResponseDto,
   PaginatedNotificationResponseDto,
@@ -53,6 +73,17 @@ export class NotificationsController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<UnreadNotificationCountResponseDto> {
     return { unreadCount: await this.service.unreadCount(user.id) };
+  }
+
+  @Post('test')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Antrekan test notification lokal/dev' })
+  @ApiCreatedResponse({ type: TestNotificationResponseDto })
+  async testNotification(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: TestNotificationDto,
+  ): Promise<TestNotificationResponseDto> {
+    return this.service.scheduleTestNotification(user.id, dto);
   }
 
   @Patch(':id/read')

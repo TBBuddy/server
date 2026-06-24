@@ -12,6 +12,7 @@ import { Collection, Filter, ObjectId, Sort, WithId } from 'mongodb';
 import { Database } from 'mongoloquent';
 import { AppException } from '../common/exceptions/app.exception';
 import { MedicineStocksIndexService } from '../medicine-stocks/medicine-stocks-index.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PatientsIndexService } from '../patients/patients-index.service';
 import { CreateTravelPlanDto } from './dto/create-travel-plan.dto';
 import { ListTravelPlansQueryDto } from './dto/list-travel-plans-query.dto';
@@ -33,6 +34,7 @@ export class TravelPlansService implements OnApplicationBootstrap {
     private readonly travelPlanModel: typeof TravelPlan,
     private readonly patientsIndex: PatientsIndexService,
     private readonly medicineStocksIndex: MedicineStocksIndexService,
+    private readonly notificationsService: NotificationsService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -61,7 +63,7 @@ export class TravelPlansService implements OnApplicationBootstrap {
     );
     const now = new Date();
 
-    await this.travelPlanModel.create({
+    const plan = await this.travelPlanModel.create({
       patient_id: userId,
       patient_profile_id: profile._id.toHexString(),
       destination: dto.destination,
@@ -70,6 +72,14 @@ export class TravelPlansService implements OnApplicationBootstrap {
       cancelled_at: null,
       created_at: now,
       updated_at: now,
+    });
+
+    await this.notificationsService.scheduleTravelReminders({
+      id: plan._id.toHexString(),
+      patient_id: userId,
+      patient_profile_id: profile._id.toHexString(),
+      destination: dto.destination,
+      departure_date: dates.departureDate,
     });
   }
 
@@ -168,6 +178,18 @@ export class TravelPlansService implements OnApplicationBootstrap {
       },
       { $set: changes },
     );
+
+    if (dto.departureDate !== undefined || dto.destination !== undefined) {
+      const updatedPlan = { ...plan, ...changes };
+      await this.notificationsService.cancelTravelReminder(plan._id.toHexString());
+      await this.notificationsService.scheduleTravelReminders({
+        id: plan._id.toHexString(),
+        patient_id: userId,
+        patient_profile_id: activeProfileId,
+        destination: updatedPlan.destination,
+        departure_date: updatedPlan.departure_date,
+      });
+    }
   }
 
   async cancel(userId: string, planId: string): Promise<void> {
@@ -192,6 +214,8 @@ export class TravelPlansService implements OnApplicationBootstrap {
         },
       },
     );
+
+    await this.notificationsService.cancelTravelReminder(plan._id.toHexString());
   }
 
   private async serialize(
