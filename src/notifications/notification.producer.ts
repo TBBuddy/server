@@ -35,7 +35,11 @@ export class NotificationProducer {
       NotificationJobName.SEND_NOTIFICATION,
       data,
       {
-        jobId: `notification:${notificationId}:send`,
+        jobId: NotificationProducer.jobId(
+          'notification',
+          notificationId,
+          'send',
+        ),
         delay: delayMs,
         attempts: 3,
         backoff: { type: 'exponential', delay: 5000 },
@@ -192,9 +196,11 @@ export class NotificationProducer {
 
   async scheduleExpoReceiptCheck(data: ExpoReceiptJobData): Promise<string> {
     const job = await this.queue.add(NotificationJobName.EXPO_RECEIPT, data, {
-      jobId: `expo-receipt:${data.notificationId}:${data.tickets
-        .map((ticket) => ticket.ticketId)
-        .join(',')}`,
+      jobId: NotificationProducer.jobId(
+        'expo-receipt',
+        data.notificationId,
+        data.tickets.map((ticket) => ticket.ticketId).join(','),
+      ),
       delay: 15 * 60 * 1000,
       attempts: 3,
       backoff: { type: 'exponential', delay: 10_000 },
@@ -258,7 +264,13 @@ export class NotificationProducer {
       NotificationJobName.MEDICINE_REMINDER,
       data,
       {
-        jobId: `notification-test:medicine:${data.patientProfileId}:${data.kind}:${Date.now()}`,
+        jobId: NotificationProducer.jobId(
+          'notification-test',
+          'medicine',
+          data.patientProfileId,
+          data.kind,
+          Date.now(),
+        ),
         delay: delayMs,
         attempts: 2,
         removeOnComplete: { age: 86400 },
@@ -276,7 +288,12 @@ export class NotificationProducer {
       NotificationJobName.MEDICINE_SKIP_EVALUATION,
       data,
       {
-        jobId: `notification-test:medicine-skip:${data.patientProfileId}:${Date.now()}`,
+        jobId: NotificationProducer.jobId(
+          'notification-test',
+          'medicine-skip',
+          data.patientProfileId,
+          Date.now(),
+        ),
         delay: delayMs,
         attempts: 2,
         removeOnComplete: { age: 86400 },
@@ -294,7 +311,12 @@ export class NotificationProducer {
       NotificationJobName.TRAVEL_REMINDER_H1,
       data,
       {
-        jobId: `notification-test:travel:${data.travelPlanId}:${Date.now()}`,
+        jobId: NotificationProducer.jobId(
+          'notification-test',
+          'travel',
+          data.travelPlanId,
+          Date.now(),
+        ),
         delay: delayMs,
         attempts: 2,
         removeOnComplete: { age: 86400 },
@@ -308,11 +330,20 @@ export class NotificationProducer {
     kind: MedicineReminderKind | 'SKIP',
     reminderDate: string,
   ): string {
-    return `medicine:${patientProfileId}:${kind.toLowerCase()}:${reminderDate}`;
+    return NotificationProducer.jobId(
+      'medicine',
+      patientProfileId,
+      kind.toLowerCase(),
+      reminderDate,
+    );
   }
 
   static travelReminderJobId(travelPlanId: string): string {
-    return `travel-reminder-h1:${travelPlanId}`;
+    return NotificationProducer.jobId('travel-reminder-h1', travelPlanId);
+  }
+
+  private static jobId(...parts: Array<string | number>): string {
+    return parts.map((part) => String(part).replace(/:/g, '_')).join('__');
   }
 
   private async scheduleNextMedicineReminder(
