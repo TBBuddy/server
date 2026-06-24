@@ -1,27 +1,16 @@
-import {
-  Controller,
-  HttpCode,
-  HttpStatus,
-  Post,
-  UploadedFile,
-  UseInterceptors,
-} from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiBody,
-  ApiConsumes,
   ApiCreatedResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { memoryStorage } from 'multer';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
-import { ImageUploadDataResponseDto } from './dto/upload-response.dto';
+import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
+import { ImageUploadSignatureDataResponseDto } from './dto/upload-response.dto';
 import { UploadsService } from './uploads.service';
-
-const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
 
 @ApiTags('uploads')
 @ApiBearerAuth()
@@ -32,31 +21,12 @@ export class UploadsController {
 
   @Post('images')
   @HttpCode(HttpStatus.CREATED)
-  @UseInterceptors(
-    FileInterceptor('image', {
-      storage: memoryStorage(),
-      limits: { fileSize: MAX_IMAGE_SIZE_BYTES },
-    }),
-  )
-  @ApiOperation({ summary: 'Upload gambar forum' })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        image: {
-          type: 'string',
-          format: 'binary',
-        },
-      },
-      required: ['image'],
-    },
-  })
-  @ApiCreatedResponse({ type: ImageUploadDataResponseDto })
-  async uploadImage(
-    @UploadedFile() file: Express.Multer.File,
-  ): Promise<ImageUploadDataResponseDto> {
-    const data = await this.service.uploadImage(file);
+  @ApiOperation({ summary: 'Buat signed URL upload gambar forum' })
+  @ApiCreatedResponse({ type: ImageUploadSignatureDataResponseDto })
+  createImageUploadSignature(
+    @CurrentUser() user: AuthenticatedUser,
+  ): ImageUploadSignatureDataResponseDto {
+    const data = this.service.createImageUploadSignature(user.id);
     return { data };
   }
 }

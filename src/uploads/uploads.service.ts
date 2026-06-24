@@ -1,77 +1,49 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { UploadApiResponse, v2 as cloudinary } from 'cloudinary';
+import { v2 as cloudinary } from 'cloudinary';
+import { ObjectId } from 'mongodb';
 import { AppException } from '../common/exceptions/app.exception';
-import { ImageUploadResponseDto } from './dto/upload-response.dto';
+import { ImageUploadSignatureResponseDto } from './dto/upload-response.dto';
 
 const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
-const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const ALLOWED_IMAGE_FORMATS = ['jpg', 'jpeg', 'png', 'webp'];
+const CLOUDINARY_FOLDER = 'tbuddy/forum';
 
 @Injectable()
 export class UploadsService {
   constructor(private readonly configService: ConfigService) {}
 
-  async uploadImage(
-    file: Express.Multer.File,
-  ): Promise<ImageUploadResponseDto> {
-    this.validateFile(file);
-    this.configureCloudinary();
-
-    const response = await new Promise<UploadApiResponse>((resolve, reject) => {
-      const stream = cloudinary.uploader.upload_stream(
-        {
-          folder: 'tbuddy/forum',
-          resource_type: 'image',
-          allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
-        },
-        (error, result) => {
-          if (error || !result) {
-            reject(
-              error instanceof Error
-                ? error
-                : new Error('Cloudinary upload failed.'),
-            );
-            return;
-          }
-          resolve(result);
-        },
-      );
-      stream.end(file.buffer);
-    });
+  createImageUploadSignature(userId: string): ImageUploadSignatureResponseDto {
+    const config = this.cloudinaryConfig();
+    const timestamp = Math.floor(Date.now() / 1000);
+    const publicId = `${CLOUDINARY_FOLDER}/${userId}/${new ObjectId().toHexString()}`;
+    const signature = cloudinary.utils.api_sign_request(
+      {
+        folder: CLOUDINARY_FOLDER,
+        public_id: publicId,
+        timestamp,
+      },
+      config.apiSecret,
+    );
 
     return {
-      url: response.secure_url,
-      publicId: response.public_id,
+      cloudName: config.cloudName,
+      apiKey: config.apiKey,
+      timestamp,
+      signature,
+      folder: CLOUDINARY_FOLDER,
+      publicId,
+      uploadUrl: `https://api.cloudinary.com/v1_1/${config.cloudName}/image/upload`,
+      allowedFormats: ALLOWED_IMAGE_FORMATS,
+      maxFileSizeBytes: MAX_IMAGE_SIZE_BYTES,
     };
   }
 
-  private validateFile(
-    file: Express.Multer.File | undefined,
-  ): asserts file is Express.Multer.File {
-    if (!file) {
-      throw new AppException(
-        400,
-        'VALIDATION_ERROR',
-        'File gambar wajib dikirim.',
-      );
-    }
-    if (!ALLOWED_IMAGE_TYPES.has(file.mimetype)) {
-      throw new AppException(
-        400,
-        'VALIDATION_ERROR',
-        'File harus berupa JPG, PNG, atau WebP.',
-      );
-    }
-    if (file.size > MAX_IMAGE_SIZE_BYTES) {
-      throw new AppException(
-        400,
-        'VALIDATION_ERROR',
-        'Ukuran gambar maksimal 5 MB.',
-      );
-    }
-  }
-
-  private configureCloudinary(): void {
+  private cloudinaryConfig(): {
+    cloudName: string;
+    apiKey: string;
+    apiSecret: string;
+  } {
     const enabled = this.configService.get<boolean>(
       'CLOUDINARY_ENABLED',
       false,
@@ -88,10 +60,6 @@ export class UploadsService {
       );
     }
 
-    cloudinary.config({
-      cloud_name: cloudName,
-      api_key: apiKey,
-      api_secret: apiSecret,
-    });
+    return { cloudName, apiKey, apiSecret };
   }
 }
