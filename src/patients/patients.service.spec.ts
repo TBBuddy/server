@@ -106,6 +106,11 @@ describe('PatientsService', () => {
       getMongoDBCollection: jest.fn(() => checkins),
     })),
   } as unknown as typeof DailyCheckin;
+  const notificationsService = {
+    scheduleDailyMedicineReminders: jest.fn(),
+    cancelPendingEpisodeJobs: jest.fn(),
+    rescheduleDailyMedicineReminders: jest.fn(),
+  };
   const service = new PatientsService(
     profileModel,
     pmoModel,
@@ -117,6 +122,7 @@ describe('PatientsService', () => {
         key === 'MONGODB_CONNECTION' ? 'mongodb://test' : 'test',
       ),
     } as unknown as ConfigService,
+    notificationsService as never,
   );
 
   beforeEach(() => {
@@ -135,6 +141,9 @@ describe('PatientsService', () => {
     stockCursor.project.mockReturnValue(stockCursor);
     stockCursor.toArray.mockResolvedValue([{ quantity: 8 }, { quantity: 10 }]);
     checkins.findOne.mockResolvedValue({ _id: new ObjectId() });
+    notificationsService.scheduleDailyMedicineReminders.mockResolvedValue([]);
+    notificationsService.cancelPendingEpisodeJobs.mockResolvedValue(undefined);
+    notificationsService.rescheduleDailyMedicineReminders.mockResolvedValue([]);
     jest
       .spyOn(DB.prototype, 'transaction')
       .mockImplementation(async (callback) => callback(session));

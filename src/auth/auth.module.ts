@@ -18,9 +18,9 @@ import { PatientsModule } from '../patients/patients.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         secret: config.getOrThrow<string>('JWT_SECRET'),
-        signOptions: {
-          expiresIn: config.getOrThrow<number>('JWT_EXPIRES_IN'),
-        },
+        // signOptions: {
+        //   expiresIn: config.getOrThrow<number>('JWT_EXPIRES_IN'),
+        // },
       }),
     }),
     PatientsModule,

@@ -14,6 +14,7 @@ import { GeminiAdapterService } from './gemini-adapter.service';
 import { AI_ASSESSMENT_QUEUE } from './ai-assessment.queue';
 import { UsersModule } from '../users/users.module';
 import { PatientsModule } from '../patients/patients.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { DailyCheckin } from '../checkins/models/daily-checkin.model';
 import { CheckinSymptom } from '../checkins/models/checkin-symptom.model';
 import { Symptom } from '../checkins/models/symptom.model';
@@ -30,6 +31,7 @@ import { Symptom } from '../checkins/models/symptom.model';
     BullModule.registerQueue({ name: AI_ASSESSMENT_QUEUE }),
     UsersModule,
     PatientsModule,
+    NotificationsModule,
   ],
   controllers: [AiAssessmentsController],
   providers: [

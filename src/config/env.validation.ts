@@ -17,12 +17,18 @@ const schema = Joi.object({
   REDIS_PASSWORD: Joi.string().allow('').optional(),
   REDIS_PREFIX: Joi.string().valid('tbbudy').default('tbbudy'),
   JWT_SECRET: Joi.string().min(32).required(),
-  JWT_EXPIRES_IN: Joi.number().integer().positive().default(3600),
+  // JWT_EXPIRES_IN: Joi.number().integer().positive().default(3600),
   BCRYPT_ROUNDS: Joi.number().integer().min(10).max(14).default(12),
   ADMIN_EMAIL: Joi.string().email().allow('').optional(),
   ADMIN_USERNAME: Joi.string().allow('').optional(),
   ADMIN_PASSWORD: Joi.string().allow('').optional(),
   ADMIN_FULL_NAME: Joi.string().allow('').default('TBuddy Administrator'),
+  MAIL_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
+  MAIL_USER: Joi.string().allow('').optional(),
+  MAIL_PASSWORD: Joi.string().allow('').optional(),
+  MAIL_FROM_NAME: Joi.string().allow('').default('TBuddy'),
+  EXPO_PUSH_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
+  EXPO_ACCESS_TOKEN: Joi.string().allow('').optional(),
 });
 
 export function validateEnvironment(config: Record<string, unknown>) {

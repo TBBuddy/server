@@ -14,7 +14,13 @@ export class AiAssessmentProducer {
   ) {}
 
   async enqueue(patientId: string, patientProfileId: string): Promise<string> {
-    const jobId = `${patientProfileId}:${new Date().toISOString().slice(0, 10)}`;
+    const jobId = [
+      'ai-assessment',
+      patientProfileId,
+      new Date().toISOString().slice(0, 10),
+    ]
+      .map((part) => part.replace(/:/g, '_'))
+      .join('__');
     const job = await this.queue.add(
       'assess',
       {
