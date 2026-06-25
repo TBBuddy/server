@@ -543,7 +543,7 @@ export class CheckinsService {
     );
     return {
       id: checkin._id.toHexString(),
-      checkinDate: checkin.checkin_date.toLocaleDateString('id-ID', {
+      checkinDate: checkin.checkin_date.toLocaleDateString('sv-SE', {
         timeZone: 'Asia/Jakarta',
       }),
       treatmentDayNumber: checkin.treatment_day_number,
